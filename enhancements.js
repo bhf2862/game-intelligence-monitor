@@ -8,34 +8,19 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 let gamesBySlug = new Map();
 let linksByGame = new Map();
+let loaded = false;
 let timer = null;
-let priceRendering = false;
+let calendarLoading = false;
+let currentHash = location.hash || '#dashboard';
 
-const editionZh = {
-  Standard: '標準版',
-  Deluxe: '豪華版',
-  Ultimate: '終極版',
-  Collector: '典藏版',
-  "Collector's Edition": '典藏版',
-  DLC: '下載內容',
-  Bundle: '組合包',
-  'Season Pass': '季票',
-  Upgrade: '升級包'
-};
-
-const platformZh = {
-  Steam: 'Steam / PC',
-  PC: '電腦 / PC',
-  'PC (Windows)': 'Windows 電腦 / PC',
-  PlayStation: 'PlayStation',
-  PS5: 'PlayStation 5 / PS5',
-  PS4: 'PlayStation 4 / PS4',
-  Xbox: 'Xbox',
-  'Xbox Series': 'Xbox Series X|S',
-  Nintendo: '任天堂 / Nintendo',
-  'Nintendo Switch': 'Nintendo Switch',
-  'Nintendo Switch 2': 'Nintendo Switch 2',
-  Epic: 'Epic Games'
+const statusText = {
+  released: '已上市 / Released',
+  preorder: '預購中 / Pre-order',
+  announced: '已公布 / Announced',
+  delayed: '延期 / Delayed',
+  early_access: '搶先體驗 / Early Access',
+  cancelled: '取消 / Cancelled',
+  unknown: '日期待定 / TBA'
 };
 
 function safeUrl(url) {
@@ -47,49 +32,17 @@ function safeUrl(url) {
   }
 }
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, c => ({
-    '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;'
-  }[c]));
+function esc(value) {
+  return String(value ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function money(v, c='TWD') {
-  if (v == null) return '—';
-  if (Number(v) === 0) return '免費 / Free';
-  return c === 'TWD'
-    ? `NT$${Number(v).toLocaleString()}`
-    : `${escapeHtml(c)} ${Number(v).toLocaleString()}`;
-}
-
-function storeIcon(store='') {
-  const s = String(store).toLowerCase();
-  if (s.includes('steam')) return '◉';
-  if (s.includes('playstation') || s === 'ps5' || s === 'ps4') return 'PS';
-  if (s.includes('xbox') || s.includes('microsoft')) return 'X';
-  if (s.includes('nintendo') || s.includes('switch')) return 'N';
-  if (s.includes('epic')) return 'E';
-  return '▣';
-}
-
-function editionLabel(value) {
-  const e = String(value || 'Standard');
-  return `${editionZh[e] || '版本'} / ${e}`;
-}
-
-function platformLabel(value) {
-  const p = String(value || '');
-  return platformZh[p] || p || '平台待同步 / Platform pending';
-}
-
-function gamePrimaryName(game) {
-  return game?.name_zh_hant || game?.name_en || 'Unknown';
-}
-
-function gameSecondaryName(game) {
-  if (!game) return '';
-  return game.name_zh_hant
-    ? game.name_en
-    : '暫無官方繁體中文名稱 / No official Traditional Chinese title';
+function zhDate(value) {
+  if (!value) return '日期待定 / TBA';
+  try {
+    return new Intl.DateTimeFormat('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(value));
+  } catch {
+    return String(value).slice(0,10);
+  }
 }
 
 function addImage(container, url, alt) {
@@ -112,37 +65,30 @@ function addImage(container, url, alt) {
   container.dataset.imageApplied = '1';
 }
 
-async function ensureMetadataForSlugs(slugs) {
-  const unique = [...new Set(slugs.filter(Boolean))].filter(s => !gamesBySlug.has(s));
-  if (!unique.length) return;
+async function ensureGameMetadata(slugs) {
+  const missing = [...new Set(slugs.filter(Boolean))].filter(slug => !gamesBySlug.has(slug));
+  if (!missing.length) return;
+  for (let i=0; i<missing.length; i+=100) {
+    const chunk = missing.slice(i,i+100);
+    const { data } = await supabase.from('games').select('id,slug,name_en,name_zh_hant,cover_url').in('slug', chunk);
+    for (const game of data || []) gamesBySlug.set(game.slug, game);
+  }
+}
 
-  for (let i = 0; i < unique.length; i += 80) {
-    const chunk = unique.slice(i, i + 80);
-    const { data: games, error } = await supabase
-      .from('games')
-      .select('id,slug,name_en,name_zh_hant,cover_url,developer,publisher,release_date')
-      .in('slug', chunk);
-    if (error || !games?.length) continue;
-
-    for (const g of games) gamesBySlug.set(g.slug, g);
-
-    const ids = games.map(g => g.id);
-    const { data: links } = await supabase
-      .from('official_links')
-      .select('game_id,label,url,tier,link_type')
-      .in('game_id', ids)
-      .limit(1000);
-
-    for (const link of links || []) {
+async function ensureLinks(gameIds) {
+  const ids = [...new Set(gameIds.filter(Boolean).map(String))].filter(id => !linksByGame.has(id));
+  if (!ids.length) return;
+  for (let i=0;i<ids.length;i+=100) {
+    const chunk = ids.slice(i,i+100);
+    const { data } = await supabase.from('official_links').select('game_id,label,url,tier,link_type').in('game_id', chunk);
+    const seen = new Set(chunk);
+    for (const id of seen) linksByGame.set(String(id), []);
+    for (const link of data || []) {
       const key = String(link.game_id);
       const list = linksByGame.get(key) || [];
-      if (!list.some(x => x.url === link.url)) list.push(link);
-      list.sort((a, b) => {
-        const ao = a.tier === 'official' ? 0 : 1;
-        const bo = b.tier === 'official' ? 0 : 1;
-        return ao - bo;
-      });
-      linksByGame.set(key, list);
+      list.push(link);
+      list.sort((a,b) => (a.tier === 'official' ? -1 : 1) - (b.tier === 'official' ? -1 : 1));
+      linksByGame.set(key,list);
     }
   }
 }
@@ -151,14 +97,12 @@ function renderSourceLinks(card, game) {
   if (!card || card.querySelector('.card-source-row')) return;
   const links = linksByGame.get(String(game.id)) || [];
   if (!links.length) return;
-
   const row = document.createElement('div');
   row.className = 'card-source-row';
   const label = document.createElement('span');
   label.textContent = '來源 / Source';
   row.appendChild(label);
-
-  for (const link of links.slice(0, 2)) {
+  for (const link of links.slice(0,2)) {
     const href = safeUrl(link.url);
     if (!href) continue;
     const a = document.createElement('a');
@@ -166,44 +110,25 @@ function renderSourceLinks(card, game) {
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     a.className = `source-chip ${link.tier === 'official' ? 'official-source' : 'third-party-source'}`;
-    a.textContent = link.tier === 'official'
-      ? '官方 / Official'
-      : `${link.label || '第三方來源'} / Third-party`;
+    a.textContent = link.tier === 'official' ? '官方 / Official' : (link.label || '第三方來源 / Third-party');
     row.appendChild(a);
   }
-
   const actions = card.querySelector('.card-actions');
   if (actions) card.insertBefore(row, actions);
   else card.appendChild(row);
 }
 
-function decorateGameName(card, game) {
-  if (!card || !game) return;
-  const h3 = card.querySelector('h3');
-  const en = card.querySelector('.en');
-  if (h3) h3.textContent = gamePrimaryName(game);
-  if (en) en.textContent = gameSecondaryName(game);
-}
-
 async function decorateCards() {
   const cards = [...document.querySelectorAll('.game-card[data-game]')];
   if (!cards.length) return;
-  await ensureMetadataForSlugs(cards.map(c => c.dataset.game));
+  await ensureGameMetadata(cards.map(card => card.dataset.game));
+  const games = cards.map(card => gamesBySlug.get(card.dataset.game)).filter(Boolean);
+  await ensureLinks(games.map(g=>g.id));
   for (const card of cards) {
     const game = gamesBySlug.get(card.dataset.game);
     if (!game) continue;
-    addImage(card.querySelector('.cover'), game.cover_url, gamePrimaryName(game));
-    decorateGameName(card, game);
+    addImage(card.querySelector('.cover'), game.cover_url, game.name_zh_hant || game.name_en);
     renderSourceLinks(card, game);
-
-    card.querySelectorAll('.tag').forEach(tag => {
-      const text = tag.textContent?.trim();
-      if (text && platformZh[text]) tag.textContent = platformZh[text];
-    });
-
-    const liveLabel = [...card.querySelectorAll('.game-stats small')]
-      .find(x => x.textContent?.trim() === 'Live');
-    if (liveLabel) liveLabel.textContent = '直播 / Live';
   }
 }
 
@@ -211,156 +136,22 @@ async function decorateDetail() {
   const hash = location.hash.replace(/^#/, '');
   if (!hash.startsWith('game/')) return;
   const slug = hash.split('/')[1];
-  await ensureMetadataForSlugs([slug]);
+  await ensureGameMetadata([slug]);
   const game = gamesBySlug.get(slug);
   if (!game) return;
-
-  addImage(document.querySelector('.detail-cover'), game.cover_url, gamePrimaryName(game));
-
-  const hero = document.querySelector('.detail-hero');
-  if (hero) {
-    const h2 = hero.querySelector('h2');
-    const p = hero.querySelector('p');
-    if (h2) h2.textContent = gamePrimaryName(game);
-    if (p) {
-      p.textContent = `${gameSecondaryName(game)} · 開發商 / Developer: ${game.developer || '待同步 / Pending'} · 發行商 / Publisher: ${game.publisher || '待同步 / Pending'}`;
-    }
-  }
-
+  addImage(document.querySelector('.detail-cover'), game.cover_url, game.name_zh_hant || game.name_en);
   const panels = [...document.querySelectorAll('.detail-grid .panel')];
   for (const panel of panels) {
     const h2 = panel.querySelector('.section-head h2');
-    const title = h2?.textContent?.trim();
-    const p = panel.querySelector('.section-head p');
-    if (title === '官方連結' || title === '連結與資料來源') {
+    if (h2?.textContent?.trim() === '官方連結') {
       h2.textContent = '連結與資料來源 / Links & Sources';
-      if (p) p.textContent = '官方與已標示第三方來源 / Official & labeled third-party';
-    } else if (title === '平台與價格') {
-      h2.textContent = '平台與價格 / Platforms & Prices';
-      if (p) p.textContent = '台灣 / TW · 新台幣 / NTD';
-    } else if (title === '平台支援') {
-      h2.textContent = '平台支援 / Platform Support';
-    } else if (title === '玩家主要問題') {
-      h2.textContent = '玩家主要問題 / Top Player Issues';
+      const p = panel.querySelector('.section-head p');
+      if (p) p.textContent = '官方 / Official · 第三方 / Third-party';
     }
   }
-
-  for (const el of document.querySelectorAll('.metric span')) {
-    const t = el.textContent?.trim();
-    if (t === '玩家評價') el.textContent = '玩家評價 / Reviews';
-    if (t === '直播觀看') el.textContent = '直播觀看 / Live Viewers';
-    if (t === '未解決問題') el.textContent = '未解決問題 / Open Issues';
-    if (t === '官方連結' || t === '來源／連結') el.textContent = '來源／連結 / Sources & Links';
-  }
-}
-
-async function renderEnhancedPrices() {
-  if (location.hash.replace(/^#/, '').split('/')[0] !== 'prices') return;
-  const page = document.querySelector('#page');
-  if (!page || page.dataset.priceEnhanced === '1' || priceRendering) return;
-  priceRendering = true;
-
-  try {
-    const { data: products, error } = await supabase
-      .from('store_products')
-      .select('id,game_id,platform,store,edition,region,currency,list_price,current_price,discount_percent,is_free,is_preorder,store_url,updated_at,games!inner(slug,name_en,name_zh_hant,cover_url)')
-      .eq('region', 'TW')
-      .order('discount_percent', { ascending: false })
-      .limit(500);
-    if (error) return;
-
-    const ids = (products || []).map(x => x.id);
-    const { data: history } = ids.length
-      ? await supabase.from('price_history').select('product_id,price,captured_at').in('product_id', ids).limit(5000)
-      : { data: [] };
-
-    const lows = new Map();
-    for (const h of history || []) {
-      const k = String(h.product_id);
-      const v = Number(h.price);
-      if (!lows.has(k) || v < lows.get(k)) lows.set(k, v);
-    }
-
-    const updated = (products || [])
-      .map(x => x.updated_at)
-      .filter(Boolean)
-      .sort()
-      .at(-1);
-
-    page.innerHTML = `
-      <section class="hero price-hero">
-        <div>
-          <div class="eyebrow">PRICE INTELLIGENCE · TW / NTD</div>
-          <h1>價格追蹤 / Price Tracker</h1>
-          <p>遊戲封面、平台、商店、版本、折扣與歷史低價集中比較。中文主顯示，英文保留於輔助資訊。</p>
-        </div>
-        <div class="sync-card">
-          <strong>${(products || []).length.toLocaleString()} 筆價格 / Price records</strong>
-          <span>最近更新 / Last update: ${updated ? new Date(updated).toLocaleString('zh-TW') : '待同步 / Pending'}</span>
-        </div>
-      </section>
-      <section class="price-cards">
-        ${(products || []).map(x => {
-          const g = x.games || {};
-          const cover = safeUrl(g.cover_url);
-          const low = lows.get(String(x.id));
-          const isLow = low != null && x.current_price != null && Number(x.current_price) <= Number(low);
-          return `
-            <article class="price-card">
-              <div class="price-cover ${cover ? 'has-image' : ''}">
-                ${cover ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(gamePrimaryName(g))}" loading="lazy" referrerpolicy="no-referrer">` : '<span>GAME</span>'}
-              </div>
-              <div class="price-game">
-                <strong>${escapeHtml(gamePrimaryName(g))}</strong>
-                <span>${escapeHtml(gameSecondaryName(g))}</span>
-                <div class="price-labels">
-                  <span class="store-badge"><i>${escapeHtml(storeIcon(x.store || x.platform))}</i>${escapeHtml(x.store || x.platform)}</span>
-                  <span class="tag">${escapeHtml(platformLabel(x.platform))}</span>
-                  <span class="tag">${escapeHtml(editionLabel(x.edition))}</span>
-                  ${x.is_preorder ? '<span class="badge warn">預購 / Pre-order</span>' : ''}
-                  ${x.is_free ? '<span class="badge ok">免費 / Free</span>' : ''}
-                </div>
-              </div>
-              <div class="price-value"><small>原價 / List</small><span>${money(x.list_price, x.currency)}</span></div>
-              <div class="price-value current"><small>現價 / Current</small><b>${money(x.current_price, x.currency)}</b>${Number(x.discount_percent) > 0 ? `<span class="badge ok">-${Number(x.discount_percent)}%</span>` : ''}</div>
-              <div class="price-value"><small>歷史低價 / Historical Low</small><b>${low != null ? money(low, x.currency) : '—'}</b>${isLow ? '<span class="badge ok">目前最低 / At low</span>' : ''}</div>
-              <div class="price-open">${safeUrl(x.store_url) ? `<a class="btn primary" href="${escapeHtml(x.store_url)}" target="_blank" rel="noopener noreferrer">前往商店 / Store ↗</a>` : '<span class="sub">連結待同步 / Link pending</span>'}</div>
-            </article>`;
-        }).join('') || '<div class="empty">價格資料正在同步 / Price data is syncing.</div>'}
-      </section>`;
-
-    page.dataset.priceEnhanced = '1';
-  } finally {
-    priceRendering = false;
-  }
-}
-
-function bilingualizeStaticText() {
-  const replacements = new Map([
-    ['全部遊戲 / Games', '全部遊戲 / Games'],
-    ['上市日曆 / Calendar', '上市日曆 / Release Calendar'],
-    ['價格追蹤 / Price Tracker', '價格追蹤 / Price Tracker'],
-    ['玩家問題 / Issues', '玩家問題 / Player Issues'],
-    ['直播熱度 / Live Trends', '直播熱度 / Live Trends'],
-    ['重大變化 / Changes', '重大變化 / Major Changes'],
-    ['我的收藏 / Watchlist', '我的收藏 / Watchlist'],
-    ['設定 / Settings', '設定 / Settings']
-  ]);
-
-  document.querySelectorAll('.hero h1').forEach(el => {
-    const t = el.textContent?.trim();
-    if (replacements.has(t)) el.textContent = replacements.get(t);
-  });
-
-  document.querySelectorAll('.badge').forEach(el => {
-    const t = el.textContent?.trim();
-    if (t === '已上市') el.textContent = '已上市 / Released';
-    if (t === '預購中') el.textContent = '預購中 / Pre-order';
-    if (t === '已公布') el.textContent = '已公布 / Announced';
-    if (t === '延期') el.textContent = '延期 / Delayed';
-    if (t === '搶先體驗') el.textContent = '搶先體驗 / Early Access';
-    if (t === '追蹤中') el.textContent = '追蹤中 / Tracking';
-  });
+  const metricLabels = [...document.querySelectorAll('.metric span')];
+  const officialMetric = metricLabels.find(x => x.textContent?.trim() === '官方連結');
+  if (officialMetric) officialMetric.textContent = '來源／連結 / Sources';
 }
 
 function addAttribution() {
@@ -369,34 +160,110 @@ function addAttribution() {
   if (!footer) return;
   const div = document.createElement('div');
   div.className = 'data-attribution';
-  div.innerHTML = '資料來源 / Data source：部分免費遊戲資料由 <a href="https://www.freetogame.com/" target="_blank" rel="noopener noreferrer">FreeToGame</a> 提供；Steam 資料以官方商店來源優先。';
+  div.innerHTML = '部分免費遊戲資料由 <a href="https://www.freetogame.com/" target="_blank" rel="noopener noreferrer">FreeToGame</a> 提供。 / Some free-game metadata provided by FreeToGame.';
   footer.appendChild(div);
 }
 
+function addBackButton() {
+  const topbar = document.querySelector('.topbar');
+  if (!topbar || topbar.querySelector('.nav-back-btn')) return;
+  const hash = location.hash || '#dashboard';
+  if (hash === '#dashboard' || hash === '') return;
+  const btn = document.createElement('button');
+  btn.className = 'btn ghost nav-back-btn';
+  btn.type = 'button';
+  btn.innerHTML = '<span class="back-arrow">←</span><span>返回 / Back</span>';
+  btn.onclick = () => {
+    const prev = sessionStorage.getItem('game-intel-prev-hash');
+    const target = prev && prev !== location.hash ? prev : (location.hash.startsWith('#game/') ? '#games' : '#dashboard');
+    location.hash = target.replace(/^#/, '');
+  };
+  topbar.insertBefore(btn, topbar.firstChild);
+}
+
+function releaseItem(g) {
+  const title = g.name_zh_hant || g.name_en;
+  const english = g.name_zh_hant && g.name_en && g.name_zh_hant !== g.name_en ? g.name_en : '';
+  const cover = safeUrl(g.cover_url);
+  return `<button class="release-card open-game" data-slug="${esc(g.slug)}">
+    <span class="release-cover">${cover ? `<img src="${esc(cover)}" alt="${esc(title)}" loading="lazy" referrerpolicy="no-referrer">` : '<span>GI</span>'}</span>
+    <span class="release-info"><strong>${esc(title)}</strong>${english ? `<small>${esc(english)}</small>` : '<small>暫無官方繁體中文名稱 / No official Traditional Chinese title</small>'}<em>${esc(zhDate(g.release_date))}</em></span>
+    <span class="badge ${g.release_status === 'released' ? 'ok' : g.release_status === 'preorder' || g.release_status === 'delayed' ? 'warn' : ''}">${esc(statusText[g.release_status] || statusText.unknown)}</span>
+  </button>`;
+}
+
+function releaseSection(title, subtitle, rows, total = null) {
+  return `<section class="release-section panel"><div class="section-head"><div><h2>${title}</h2><p>${subtitle}</p></div><span class="release-count">${(total ?? rows.length).toLocaleString()} 款 / games</span></div><div class="release-list">${rows.map(releaseItem).join('') || '<div class="empty">目前沒有資料 / No data yet</div>'}</div></section>`;
+}
+
+async function enhanceCalendar() {
+  if (location.hash.replace(/^#/,'') !== 'calendar' || calendarLoading) return;
+  const page = document.querySelector('#page');
+  if (!page || page.dataset.fullCalendar === '1') return;
+  calendarLoading = true;
+  try {
+    const now = new Date();
+    const future = new Date(now.getTime() + 3*365*86400000).toISOString();
+    const recent = new Date(now.getTime() - 180*86400000).toISOString();
+    const nowIso = now.toISOString();
+    const [upcomingQ, recentQ, announcedQ, tbaQ, tbaCountQ, datedCountQ] = await Promise.all([
+      supabase.from('games').select('id,slug,name_en,name_zh_hant,cover_url,release_status,release_date').gte('release_date',nowIso).lte('release_date',future).order('release_date',{ascending:true}).limit(300),
+      supabase.from('games').select('id,slug,name_en,name_zh_hant,cover_url,release_status,release_date').gte('release_date',recent).lt('release_date',nowIso).order('release_date',{ascending:false}).limit(200),
+      supabase.from('games').select('id,slug,name_en,name_zh_hant,cover_url,release_status,release_date,updated_at').is('release_date',null).in('release_status',['announced','preorder','delayed','early_access']).order('updated_at',{ascending:false}).limit(250),
+      supabase.from('games').select('id,slug,name_en,name_zh_hant,cover_url,release_status,release_date,updated_at').is('release_date',null).order('updated_at',{ascending:false}).limit(250),
+      supabase.from('games').select('id',{count:'exact',head:true}).is('release_date',null),
+      supabase.from('games').select('id',{count:'exact',head:true}).not('release_date','is',null)
+    ]);
+    if ([upcomingQ,recentQ,announcedQ,tbaQ].some(q=>q.error)) throw new Error('上市資料讀取失敗');
+    const announced = announcedQ.data || [];
+    const announcedIds = new Set(announced.map(g=>g.id));
+    const otherTba = (tbaQ.data || []).filter(g=>!announcedIds.has(g.id));
+    page.innerHTML = `<section class="hero"><div><div class="eyebrow">RELEASE INTELLIGENCE · 上市情報</div><h1>上市名單 / Release Calendar</h1><p>完整保留有日期與日期待定遊戲。即將上市、近期上市、已公布 TBA 與其他 TBA 分開顯示。</p></div><div class="sync-card"><strong>${(datedCountQ.count||0).toLocaleString()} 有日期 / dated</strong><span>${(tbaCountQ.count||0).toLocaleString()} 日期待定 / TBA</span></div></section>
+      <div class="calendar-summary"><span>未來 3 年 / Next 3 years</span><span>近期 180 天 / Last 180 days</span><span>TBA 不再隱藏 / TBA included</span></div>
+      ${releaseSection('即將上市 / Upcoming','未來三年已有明確上市日期 / Confirmed dates in the next 3 years', upcomingQ.data||[])}
+      ${releaseSection('近期上市 / Recently Released','過去 180 天已上市 / Released in the last 180 days', recentQ.data||[])}
+      ${releaseSection('已公布・日期待定 / Announced TBA','已公布、預購、延期或搶先體驗，但尚無確切日期 / Announced without a confirmed date', announced, announced.length)}
+      ${releaseSection('其他日期待定 / Other TBA','目前資料源尚未提供確切日期；顯示最近更新的項目 / Recently updated titles without a confirmed date', otherTba, tbaCountQ.count||otherTba.length)}
+      <div class="footer">上市資料會隨 Steam 與後續跨平台來源持續補齊 / Release data continues to improve as sources sync.</div>`;
+    page.dataset.fullCalendar = '1';
+    document.querySelectorAll('.release-card.open-game').forEach(b=>b.onclick=()=>{location.hash=`game/${b.dataset.slug}`});
+    addBackButton();
+  } catch (error) {
+    console.warn('[Game Intel] calendar enhancement failed', error);
+  } finally {
+    calendarLoading = false;
+  }
+}
+
 async function decorate() {
+  addBackButton();
   await decorateCards();
   await decorateDetail();
-  bilingualizeStaticText();
   addAttribution();
-  await renderEnhancedPrices();
+  if (location.hash.replace(/^#/,'') === 'calendar') await enhanceCalendar();
+}
+
+async function loadMetadata() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return;
+  loaded = true;
+  decorate();
 }
 
 const observer = new MutationObserver(() => {
   clearTimeout(timer);
-  timer = setTimeout(() => decorate().catch(() => {}), 100);
+  timer = setTimeout(() => { if (loaded) decorate(); }, 90);
 });
 observer.observe(document.documentElement, { childList: true, subtree: true });
 
 window.addEventListener('hashchange', () => {
-  setTimeout(() => {
-    const page = document.querySelector('#page');
-    if (page) delete page.dataset.priceEnhanced;
-    decorate().catch(() => {});
-  }, 180);
+  const next = location.hash || '#dashboard';
+  if (currentHash !== next) sessionStorage.setItem('game-intel-prev-hash', currentHash);
+  currentHash = next;
+  setTimeout(() => { if (loaded) decorate(); }, 120);
 });
 
 supabase.auth.onAuthStateChange((_event, session) => {
-  if (session) setTimeout(() => decorate().catch(() => {}), 300);
+  if (session) setTimeout(loadMetadata, 250);
 });
-
-setTimeout(() => decorate().catch(() => {}), 650);
+setTimeout(loadMetadata, 500);
