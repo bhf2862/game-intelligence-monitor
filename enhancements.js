@@ -70,7 +70,7 @@ async function ensureGameMetadata(slugs) {
   if (!missing.length) return;
   for (let i=0; i<missing.length; i+=100) {
     const chunk = missing.slice(i,i+100);
-    const { data } = await supabase.from('games').select('id,slug,name_en,name_zh_hant,cover_url').in('slug', chunk);
+    const { data } = await supabase.from('games').select('id,slug,name_en,name_zh_hant,cover_url,release_date,release_status').in('slug', chunk);
     for (const game of data || []) gamesBySlug.set(game.slug, game);
   }
 }
@@ -118,6 +118,29 @@ function renderSourceLinks(card, game) {
   else card.appendChild(row);
 }
 
+function renderReleaseDate(card, game) {
+  if (!card || card.querySelector('.card-release-row')) return;
+  const row = document.createElement('div');
+  row.className = 'card-release-row';
+  const icon = document.createElement('span');
+  icon.className = 'card-release-icon';
+  icon.textContent = '📅';
+  const label = document.createElement('span');
+  label.className = 'card-release-label';
+  label.textContent = '上市 / Release';
+  const value = document.createElement('strong');
+  value.className = game.release_date ? 'card-release-date' : 'card-release-date tba';
+  value.textContent = game.release_date ? zhDate(game.release_date) : '日期待定 / TBA';
+  row.append(icon, label, value);
+  const tags = card.querySelector('.tags');
+  if (tags) card.insertBefore(row, tags);
+  else {
+    const stats = card.querySelector('.game-stats');
+    if (stats) card.insertBefore(row, stats);
+    else card.appendChild(row);
+  }
+}
+
 async function decorateCards() {
   const cards = [...document.querySelectorAll('.game-card[data-game]')];
   if (!cards.length) return;
@@ -128,6 +151,7 @@ async function decorateCards() {
     const game = gamesBySlug.get(card.dataset.game);
     if (!game) continue;
     addImage(card.querySelector('.cover'), game.cover_url, game.name_zh_hant || game.name_en);
+    renderReleaseDate(card, game);
     renderSourceLinks(card, game);
   }
 }
