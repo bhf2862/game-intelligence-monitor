@@ -25,7 +25,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check JavaScript syntax
-        run: node --check app.js
+        run: |
+          node --check app.js
+          node --check navigation.js
+
+      - name: Test navigation history
+        run: node navigation.test.mjs
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
