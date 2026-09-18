@@ -633,7 +633,7 @@ async function pagePrices(){
 async function pageIssues(){
   const selectFields='*,games!inner(id,slug,name_en,name_zh_hant,cover_url)';
   const optionPromise=supabase.from('game_issues')
-    .select('game_id,mention_count_24h,games!inner(id,slug,name_en,name_zh_hant)')
+    .select('game_id,mention_count_24h,games!inner(id,slug,name_en,name_zh_hant,cover_url)')
     .eq('resolved',false)
     .order('mention_count_24h',{ascending:false})
     .limit(1200);
@@ -689,6 +689,8 @@ async function pageIssues(){
     if(!g||optionMap.has(String(x.game_id)))continue;
     optionMap.set(String(x.game_id),{
       id:String(x.game_id),
+      slug:g.slug||'',
+      cover_url:g.cover_url||'',
       zh:g.name_zh_hant||'',
       en:g.name_en||'',
       label:g.name_zh_hant&&g.name_en&&g.name_zh_hant!==g.name_en
@@ -699,6 +701,19 @@ async function pageIssues(){
   const gameOptions=[...optionMap.values()].sort((a,b)=>a.label.localeCompare(b.label,'zh-Hant'));
   const shownGames=new Set(rows.map(x=>String(x.game_id))).size;
   const currentGame=state.issueGame==='all'?null:optionMap.get(String(state.issueGame));
+  const selectedProblemCount=currentGame?rows.length:0;
+  const selectedMentions24h=currentGame?rows.reduce((sum,x)=>sum+Number(x.mention_count_24h||0),0):0;
+  const selectedTopIssue=currentGame&&rows.length
+    ? [...rows].sort((a,b)=>Number(b.mention_count_24h||0)-Number(a.mention_count_24h||0))[0]
+    : null;
+  const selectedLatest=currentGame
+    ? rows.reduce((latest,x)=>{
+        const value=x.last_seen||x.first_seen||null;
+        if(!value)return latest;
+        if(!latest||new Date(value)>new Date(latest))return value;
+        return latest;
+      },null)
+    : null;
 
   pageEl().innerHTML=`${header('玩家問題 / Issues','可用中文或英文遊戲名稱搜尋，也能直接篩選某款遊戲查看它的所有未解決問題。')}
     <section class="issue-filter-panel">
@@ -723,6 +738,36 @@ async function pageIssues(){
         <div><small>問題 / Issues</small><strong>${rows.length.toLocaleString()}</strong></div>
       </div>
     </section>
+    ${currentGame?`<section class="selected-game-issue-summary">
+      <button class="selected-game-identity open-game" data-slug="${esc(currentGame.slug)}">
+        <span class="selected-game-cover native-cover">${gameCoverInner(currentGame)}</span>
+        <span>
+          <small>已選遊戲 / Selected game</small>
+          <strong>${esc(currentGame.zh||currentGame.en)}</strong>
+          <em>${esc(currentGame.en||'')}</em>
+        </span>
+      </button>
+      <div class="selected-issue-metric">
+        <small>問題總數 / Total issues</small>
+        <strong>${selectedProblemCount.toLocaleString()}</strong>
+        <span>目前未解決問題類型</span>
+      </div>
+      <div class="selected-issue-metric selected-issue-top">
+        <small>最常見問題 / Top issue</small>
+        <strong>${selectedTopIssue?esc(selectedTopIssue.title_zh||selectedTopIssue.issue_category):'—'}</strong>
+        <span>${selectedTopIssue?esc(selectedTopIssue.title_en||selectedTopIssue.issue_category):'No issue data'}${selectedTopIssue?` · 24H ${Number(selectedTopIssue.mention_count_24h||0).toLocaleString()}`:''}</span>
+      </div>
+      <div class="selected-issue-metric">
+        <small>24H 提及總量 / Mentions</small>
+        <strong>${selectedMentions24h.toLocaleString()}</strong>
+        <span>所有問題合計</span>
+      </div>
+      <div class="selected-issue-metric">
+        <small>最近更新 / Last update</small>
+        <strong class="selected-update-time">${selectedLatest?fmtDate(selectedLatest,true):'—'}</strong>
+        <span>${selectedLatest?'最後問題活動時間':'尚無更新時間'}</span>
+      </div>
+    </section>`:''}
     <div class="issue-list">
       ${rows.map(x=>`<article class="issue-game-card">
         <button class="issue-game-preview open-game" data-slug="${esc(x.games?.slug)}" aria-label="預覽 ${esc(x.games?.name_zh_hant||x.games?.name_en)}">
