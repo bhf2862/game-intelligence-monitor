@@ -640,8 +640,9 @@ async function showPricePreview(productId){
 
   const shell=document.createElement('div');
   shell.className='game-preview-backdrop';
-  shell.innerHTML='<div class="game-preview-modal price-preview-modal"><button class="game-preview-close" type="button" aria-label="關閉預覽">×</button><div class="game-preview-loading">讀取價格預覽 / Loading price preview…</div></div>';
+  shell.innerHTML='<div class="game-preview-modal price-preview-modal"><button class="game-preview-close" type="button" aria-label="關閉預覽">×</button><div class="game-preview-loading"><strong>價格預覽 / Price Preview</strong><span>正在讀取商品與價格資料…</span></div></div>';
   document.body.appendChild(shell);
+  shell.dataset.productId=String(productId);
   shell.querySelector('.game-preview-close').onclick=closeGamePreview;
   shell.addEventListener('click',e=>{if(e.target===shell)closeGamePreview();});
 
@@ -752,17 +753,23 @@ async function showPricePreview(productId){
 }
 
 function bindPricePreviews(){
-  const page=pageEl();
-  if(!page||page.dataset.pricePreviewDelegated==='1')return;
-  page.dataset.pricePreviewDelegated='1';
-  page.addEventListener('click',e=>{
-    const target=e.target.closest('[data-price-preview]');
-    if(!target)return;
-    e.preventDefault();
-    e.stopPropagation();
-    showPricePreview(target.dataset.pricePreview);
+  document.querySelectorAll('[data-price-preview]').forEach(btn=>{
+    if(btn.dataset.pricePreviewBound==='1')return;
+    btn.dataset.pricePreviewBound='1';
+    btn.type='button';
+    btn.onclick=e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      const productId=btn.dataset.pricePreview;
+      if(!productId){
+        toast('價格預覽缺少商品 ID / Missing product ID',true);
+        return;
+      }
+      void showPricePreview(productId);
+    };
   });
 }
+window.__showPricePreview=productId=>showPricePreview(productId);
 async function pagePrices(){
   const {data,error}=await supabase.from('store_products')
     .select('*,games!inner(id,slug,name_en,name_zh_hant,cover_url)')
@@ -869,7 +876,7 @@ async function pagePrices(){
         const cover=game.cover_url?esc(game.cover_url):'';
         const editionZh=({'Standard':'標準版','Deluxe':'豪華版','Ultimate':'終極版','Collector':'典藏版','DLC':'下載內容','Bundle':'組合包'})[x.edition]||x.edition||'版本';
         return `<article class="price-card price-card-rich">
-          <button class="price-cover native-cover price-preview-trigger" data-price-preview="${esc(x.id)}" aria-label="價格預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</button>
+          <button type="button" class="price-cover native-cover price-preview-trigger" data-price-preview="${esc(x.id)}" aria-label="價格預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</button>
           <div class="price-game">
             <strong>${esc(game.name_zh_hant||game.name_en)}</strong>
             <span>${esc(game.name_en||'')}</span>
@@ -904,7 +911,7 @@ async function pagePrices(){
             </div>
           </div>
           <div class="price-open">
-            <button class="btn primary price-preview-trigger" data-price-preview="${esc(x.id)}">價格預覽 / Price Preview</button>
+            <button type="button" class="btn primary price-preview-trigger" data-price-preview="${esc(x.id)}">價格預覽 / Price Preview</button>
             ${x.store_url?`<button class="btn" data-url="${esc(x.store_url)}">前往商店 ↗</button>`:''}
           </div>
         </article>`;
@@ -1484,7 +1491,7 @@ async function pagePrices(){
         const cover=game.cover_url?esc(game.cover_url):'';
         const editionZh=({'Standard':'標準版','Deluxe':'豪華版','Ultimate':'終極版','Collector':'典藏版','DLC':'下載內容','Bundle':'組合包'})[x.edition]||x.edition||'版本';
         return `<article class="price-card price-card-rich">
-          <button class="price-cover native-cover price-preview-trigger" data-price-preview="${esc(x.id)}" aria-label="價格預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</button>
+          <button type="button" class="price-cover native-cover price-preview-trigger" data-price-preview="${esc(x.id)}" aria-label="價格預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</button>
           <div class="price-game">
             <strong>${esc(game.name_zh_hant||game.name_en)}</strong>
             <span>${esc(game.name_en||'')}</span>
@@ -1519,7 +1526,7 @@ async function pagePrices(){
             </div>
           </div>
           <div class="price-open">
-            <button class="btn primary price-preview-trigger" data-price-preview="${esc(x.id)}">價格預覽 / Price Preview</button>
+            <button type="button" class="btn primary price-preview-trigger" data-price-preview="${esc(x.id)}">價格預覽 / Price Preview</button>
             ${x.store_url?`<button class="btn" data-url="${esc(x.store_url)}">前往商店 ↗</button>`:''}
           </div>
         </article>`;
