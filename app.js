@@ -328,7 +328,7 @@ async function pageDashboard(){
     supabase.from('games').select('*').gte('release_date',nowIso).neq('release_status','released').neq('release_status','cancelled').order('release_date',{ascending:true}).limit(6),
     supabase.from('games').select('*').eq('release_status','released').order('updated_at',{ascending:false}).limit(6),
     supabase.from('store_products').select('*,games!inner(slug,name_en,name_zh_hant,cover_url)').eq('region','TW').gt('discount_percent',0).order('discount_percent',{ascending:false}).limit(6),
-    supabase.from('game_issues').select('*,games!inner(slug,name_en,name_zh_hant)').eq('resolved',false).order('mention_count_24h',{ascending:false}).limit(6),
+    supabase.from('game_issues').select('*,games!inner(slug,name_en,name_zh_hant,cover_url)').eq('resolved',false).order('mention_count_24h',{ascending:false}).limit(6),
     supabase.from('change_events').select('*,games(name_zh_hant,name_en,slug)').gte('detected_at',since).order('detected_at',{ascending:false}).limit(8),
     supabase.from('source_health').select('source_name,status,message,checked_at').in('source_name',['twitch','youtube']).order('source_name')
   ]);
@@ -402,7 +402,7 @@ async function pageDashboard(){
         <div class="section-head"><div><h2>玩家問題 / Player Issues</h2><p>24 小時提及量最高</p></div><button class="btn ghost" data-route-jump="issues">問題頁 →</button></div>
         <div class="dashboard-signal-list">
           ${issues.map(x=>`<button class="dashboard-signal dashboard-signal-button open-game" data-slug="${esc(x.games?.slug)}">
-            <div><strong>${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong><small>${esc(x.title_zh||x.issue_category)} / ${esc(x.title_en||x.issue_category)}</small></div>
+            <div class="dashboard-signal-game"><span class="dashboard-thumb native-cover">${gameCoverInner(x.games||{})}</span><span><small class="issue-game-label">遊戲 / Game</small><strong>${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong><small>問題 / Issue：${esc(x.title_zh||x.issue_category)} / ${esc(x.title_en||x.issue_category)}</small></span></div>
             <div class="dashboard-signal-value"><b>24H ${Number(x.mention_count_24h||0).toLocaleString()}</b><span class="badge ${x.official_confirmed?'ok':''}">${x.official_confirmed?'官方確認':'追蹤中'}</span></div>
           </button>`).join('')||'<div class="empty">目前沒有達門檻的玩家問題。</div>'}
         </div>
@@ -630,8 +630,44 @@ async function pagePrices(){
   bindCards();
   document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));
 }
-async function pageIssues(){const {data,error}=await supabase.from('game_issues').select('*,games!inner(slug,name_en,name_zh_hant)').eq('resolved',false).order('mention_count_24h',{ascending:false}).limit(300);if(error)throw error;pageEl().innerHTML=`${header('玩家問題 / Issues','問題分類、提及量、成長率與官方確認狀態。')}<div class="panel">${(data||[]).map(x=>`<div class="issue-row" style="grid-template-columns:minmax(220px,1.3fr) 1fr 90px 90px"><div><b>${esc(x.games?.name_zh_hant||x.games?.name_en)}</b><div class="sub">${esc(x.title_zh)} / ${esc(x.title_en)}</div></div><span class="badge ${x.official_confirmed?'ok':''}">${esc(x.issue_category)}${x.official_confirmed?' · 官方確認':''}</span><span>24H ${Number(x.mention_count_24h).toLocaleString()}</span><b>${x.growth_24h!=null?`${Number(x.growth_24h)>0?'+':''}${Number(x.growth_24h)}%`:'—'}</b></div>`).join('')||'<div class="empty">目前尚未偵測到達門檻的玩家問題。</div>'}</div>`;}
-
+async function pageIssues(){
+  const {data,error}=await supabase.from('game_issues')
+    .select('*,games!inner(slug,name_en,name_zh_hant,cover_url)')
+    .eq('resolved',false)
+    .order('mention_count_24h',{ascending:false})
+    .limit(300);
+  if(error)throw error;
+  const rows=data||[];
+  pageEl().innerHTML=`${header('玩家問題 / Issues','每筆問題都清楚標示所屬遊戲、問題類型、提及量、成長率與官方確認狀態。')}
+    <div class="issue-list">
+      ${rows.map(x=>`<article class="issue-game-card">
+        <button class="issue-game-preview open-game" data-slug="${esc(x.games?.slug)}" aria-label="預覽 ${esc(x.games?.name_zh_hant||x.games?.name_en)}">
+          <span class="issue-game-cover native-cover">${gameCoverInner(x.games||{})}</span>
+          <span class="issue-game-info">
+            <small class="issue-game-label">遊戲 / Game</small>
+            <strong class="issue-game-name">${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong>
+            <span class="issue-game-en">${esc(x.games?.name_en||'')}</span>
+          </span>
+        </button>
+        <div class="issue-problem">
+          <small>問題 / Issue</small>
+          <strong>${esc(x.title_zh||x.issue_category)}</strong>
+          <span>${esc(x.title_en||x.issue_category)}</span>
+          <span class="badge ${x.official_confirmed?'ok':''}">${esc(x.issue_category)}${x.official_confirmed?' · 官方確認 / Confirmed':' · 追蹤中 / Tracking'}</span>
+        </div>
+        <div class="issue-number">
+          <small>24H 提及 / Mentions</small>
+          <strong>${Number(x.mention_count_24h||0).toLocaleString()}</strong>
+        </div>
+        <div class="issue-number">
+          <small>24H 成長 / Growth</small>
+          <strong>${x.growth_24h!=null?`${Number(x.growth_24h)>0?'+':''}${Number(x.growth_24h)}%`:'—'}</strong>
+        </div>
+        <button class="btn issue-preview-btn open-game" data-slug="${esc(x.games?.slug)}">預覽遊戲 / Preview</button>
+      </article>`).join('')||'<div class="empty">目前尚未偵測到達門檻的玩家問題。</div>'}
+    </div>`;
+  bindCards();
+}
 async function pageLive(){const {data,error}=await supabase.from('streaming_snapshots').select('*,games!inner(slug,name_en,name_zh_hant)').order('captured_at',{ascending:false}).limit(1000);if(error)throw error;const latest=new Map();for(const x of data||[]){const k=`${x.game_id}:${x.source}`;if(!latest.has(k))latest.set(k,x)}const combined=new Map();for(const x of latest.values()){const k=String(x.game_id),cur=combined.get(k)||{game:x.games,viewers:0,channels:0,sources:[]};cur.viewers+=Number(x.viewer_count);cur.channels+=Number(x.channel_count);cur.sources.push(x.source);combined.set(k,cur)}const rows=[...combined.values()].sort((a,b)=>b.viewers-a.viewers);pageEl().innerHTML=`${header('直播熱度 / Live Trends','Twitch + YouTube 分開採集，排行榜顯示合計觀看與頻道數。')}<div class="panel">${rows.map((x,i)=>`<div class="rank-row"><span class="rank">${String(i+1).padStart(2,'0')}</span><div><b>${esc(x.game?.name_zh_hant||x.game?.name_en)}</b><div class="sub">${esc(x.sources.join(' + '))}</div></div><b>${x.viewers.toLocaleString()}</b><span>${x.channels.toLocaleString()} 頻道</span></div>`).join('')||'<div class="empty">尚未取得直播快照；接通 Twitch / YouTube 同步後會自動累積。</div>'}</div>`;}
 
 async function pageChanges(){const {data,error}=await supabase.from('change_events').select('*,games(name_zh_hant,name_en,slug)').order('detected_at',{ascending:false}).limit(300);if(error)throw error;pageEl().innerHTML=`${header('重大變化 / Changes','只記錄達到門檻的上市、價格、評價、問題與直播事件。')}<div class="panel">${(data||[]).map(x=>`<div class="timeline-row" style="grid-template-columns:120px minmax(220px,1fr) 1fr"><div><span class="badge ${x.severity==='critical'?'danger':x.severity==='high'?'warn':''}">${esc(eventZh(x.event_type))}</span><div class="sub" style="margin-top:5px">${fmtDate(x.detected_at,true)}</div></div><div><b>${esc(x.games?.name_zh_hant||x.games?.name_en||'系統事件')}</b><div class="sub">${esc(x.games?.name_en||'')}</div></div><code class="sub">${esc(JSON.stringify(x.new_value||{}))}</code></div>`).join('')||'<div class="empty">目前沒有重大變化。</div>'}</div>`;}
