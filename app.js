@@ -44,6 +44,17 @@ function withTimeout(promise,ms,label){
     new Promise((_,reject)=>setTimeout(()=>reject(new Error(`${label} timeout after ${Math.round(ms/1000)}s`)),ms))
   ]);
 }
+
+async function gameIntelFetch(input,init={}){
+  const url=typeof input==='string'?input:(input?.url||String(input));
+  const headers=new Headers(init.headers||(input instanceof Request?input.headers:undefined));
+  if(url.startsWith(SUPABASE_URL+'/rest/v1/')||url.startsWith(SUPABASE_URL+'/functions/v1/')){
+    headers.set('apikey',SUPABASE_KEY);
+    const token=state?.session?.access_token;
+    if(token)headers.set('Authorization',`Bearer ${token}`);
+  }
+  return fetch(input,{...init,headers});
+}
 const FILTER_RECOVERY_KEY='game-intel-filter-recovery-20260918';
 if(!localStorage.getItem(FILTER_RECOVERY_KEY)){
   localStorage.removeItem('game-intel-gameplay-filters');
@@ -255,7 +266,8 @@ async function init(){
   try{
     const createClient=await loadSupabaseSdk();
     supabase=createClient(SUPABASE_URL,SUPABASE_KEY,{
-      auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+      auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true},
+      global:{fetch:gameIntelFetch}
     });
 
     bootMessage('Loading Game Intelligence Monitor…','正在確認登入狀態 / Checking session…');
@@ -285,11 +297,21 @@ async function init(){
       }
     }
 
-    supabase.auth.onAuthStateChange((_event,nextSession)=>{
+    supabase.auth.onAuthStateChange((event,nextSession)=>{
+      if(event==='INITIAL_SESSION')return;
+      if(event==='TOKEN_REFRESHED'){
+        state.session=nextSession;
+        return;
+      }
       setTimeout(async()=>{
         try{
           state.session=nextSession;
-          state.allowed=nextSession?await withTimeout(checkAllowed(),8000,'Access check'):false;
+          if(!nextSession){
+            state.allowed=false;
+            render();
+            return;
+          }
+          state.allowed=await withTimeout(checkAllowed(),10000,'Access check');
           if(state.allowed){
             const dataReady=await withTimeout(ensureDataSession(),10000,'Data session');
             if(!dataReady)throw new Error('遊戲資料登入狀態尚未建立 / Data session unavailable');
@@ -362,31 +384,30 @@ async function checkAllowed(){
 }
 
 async function ensureDataSession(){
-  const test=async()=>{
-    const {count,error}=await supabase.from('games').select('id',{count:'exact',head:true});
-    return {count:Number(count||0),error};
-  };
+  const token=state.session?.access_token;
+  if(!token)return false;
 
-  let probe=await test();
-  if(!probe.error&&probe.count>0)return true;
+  try{
+    const response=await withTimeout(fetch(`${SUPABASE_URL}/rest/v1/games?select=id&limit=1`,{
+      method:'GET',
+      headers:{
+        'apikey':SUPABASE_KEY,
+        'Authorization':`Bearer ${token}`,
+        'Accept':'application/json'
+      }
+    }),8000,'Data REST probe');
 
-  console.warn('[Game Intel] data session probe failed or returned zero',probe);
+    if(!response.ok){
+      console.error('[Game Intel] data REST probe failed',response.status,await response.text().catch(()=>''));
+      return false;
+    }
 
-  const session=state.session;
-  if(session?.access_token&&session?.refresh_token){
-    const {data,error}=await supabase.auth.setSession({
-      access_token:session.access_token,
-      refresh_token:session.refresh_token
-    });
-    if(error)console.warn('[Game Intel] setSession failed',error);
-    if(data?.session)state.session=data.session;
+    const rows=await response.json().catch(()=>[]);
+    return Array.isArray(rows)&&rows.length>0;
+  }catch(err){
+    console.error('[Game Intel] data REST probe error',err);
+    return false;
   }
-
-  probe=await test();
-  if(!probe.error&&probe.count>0)return true;
-
-  console.error('[Game Intel] data access still unavailable',probe);
-  return false;
 }
 
 function render(){
