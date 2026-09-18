@@ -59,3 +59,24 @@
 @media(max-width:1350px){.price-card-rich{grid-template-columns:100px minmax(200px,1.4fr) 90px 110px 150px minmax(210px,1fr)}.price-card-rich .price-open{grid-column:2/-1;display:flex;justify-content:flex-start}.price-card-rich .price-open .btn{width:auto}}
 @media(max-width:950px){.price-card-rich{grid-template-columns:90px 1fr 1fr}.price-card-rich .price-game{grid-column:2/4}.price-card-rich .price-history-compare{grid-column:1/-1;border-top:1px solid var(--line);padding-top:8px}.price-card-rich .price-open{grid-column:1/-1}.offer-end{border-top:1px solid var(--line);padding-top:8px}}
 @media(max-width:720px){.price-summary-grid{grid-template-columns:1fr 1fr}.price-summary-grid>div:first-child{grid-column:1/-1}.price-card-rich{grid-template-columns:78px 1fr 1fr}.price-card-rich .price-cover{height:76px}.price-card-rich .price-game{grid-column:2/4}.price-history-mini{display:grid;grid-template-columns:1fr}.price-card-rich .price-open{display:grid;grid-template-columns:1fr 1fr}.price-card-rich .price-open .btn{width:100%}}
+
+.native-cover{position:relative;overflow:hidden;background:linear-gradient(135deg,#1d334a,#183c43);display:grid;place-items:center}
+.native-cover-img{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;z-index:2}
+.cover-fallback{position:relative;z-index:1;color:#7990aa;font-weight:900;font-size:12px;letter-spacing:.04em}
+.native-cover.has-native-image .cover-fallback{opacity:0}
+.dashboard-thumb{width:66px;height:42px;border-radius:7px;flex:0 0 auto}
+.dashboard-release{grid-template-columns:66px 112px minmax(0,1fr) auto}
+.dashboard-signal-game{display:flex;align-items:center;gap:9px;min-width:0}.dashboard-signal-game>span:last-child{min-width:0}
+.price-cover.native-cover{position:relative}.price-cover.native-cover .cover-fallback{font-size:11px}
+.game-preview-backdrop{position:fixed;inset:0;z-index:9999;background:rgba(3,7,12,.78);backdrop-filter:blur(5px);display:grid;place-items:center;padding:20px}
+.game-preview-modal{position:relative;width:min(760px,100%);max-height:min(86vh,760px);overflow:auto;border:1px solid #294159;background:linear-gradient(180deg,#111d2c,#0b131f);border-radius:17px;padding:16px;box-shadow:0 24px 80px rgba(0,0,0,.55)}
+.game-preview-close{position:absolute;right:10px;top:10px;z-index:5;width:34px;height:34px;border:1px solid var(--line);background:#111e2e;color:var(--text);border-radius:50%;font-size:20px;cursor:pointer}
+.game-preview-hero{display:grid;grid-template-columns:220px minmax(0,1fr);gap:16px;align-items:center;padding-right:34px}
+.game-preview-cover{height:124px;border-radius:11px}
+.game-preview-main h2{margin:6px 0 2px;font-size:21px}.game-preview-en{color:var(--muted);font-size:10px}.game-preview-date{margin:10px 0;font-size:11px;color:#cceef0}
+.game-preview-desc{margin:14px 0;color:#aebfd0;font-size:10px;line-height:1.55}
+.game-preview-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.game-preview-metrics>div{border:1px solid var(--line);background:#0d1724;border-radius:10px;padding:9px;display:grid;gap:4px}.game-preview-metrics small{color:var(--muted);font-size:8px}.game-preview-metrics strong{font-size:16px}.game-preview-metrics span{font-size:8px;color:#9db1c4}
+.game-preview-issues{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.game-preview-issues span{border:1px solid rgba(255,180,90,.2);background:rgba(255,180,90,.05);border-radius:999px;padding:4px 7px;font-size:8px;color:#e7c89f}
+.game-preview-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}
+.game-preview-loading{padding:60px 20px;text-align:center;color:var(--muted)}
+@media(max-width:720px){.dashboard-release{grid-template-columns:58px 86px 1fr auto}.dashboard-thumb{width:58px;height:38px}.game-preview-backdrop{padding:10px}.game-preview-modal{padding:13px;max-height:92vh}.game-preview-hero{grid-template-columns:1fr;padding-right:28px}.game-preview-cover{height:160px}.game-preview-main h2{font-size:17px}.game-preview-metrics{grid-template-columns:1fr 1fr}.game-preview-metrics>div:last-child{grid-column:1/-1}.game-preview-actions{display:grid;grid-template-columns:1fr 1fr}.game-preview-actions .btn{width:100%}}
