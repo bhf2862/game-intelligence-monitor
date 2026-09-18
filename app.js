@@ -205,8 +205,85 @@ async function hydrateGames(games){
   ]);
   return games.map(g=>{const gid=String(g.id);const products=(pr.data||[]).filter(x=>String(x.game_id)===gid).sort((a,b)=>(a.current_price??1e15)-(b.current_price??1e15));return{...g,platforms:(pl.data||[]).filter(x=>String(x.game_id)===gid),price:products[0]||null,review:(rv.data||[]).find(x=>String(x.game_id)===gid)||null,issue:(is.data||[]).find(x=>String(x.game_id)===gid)||null,live:(st.data||[]).find(x=>String(x.game_id)===gid)||null};});
 }
-function gameCard(g){const releaseText=g.release_date?fmtDate(g.release_date):'日期待定 / TBA';return `<article class="game-card" data-game="${esc(g.slug)}"><div class="cover">${esc(initials(g.name_en))}</div><span class="badge ${statusClass(g.release_status)}">${esc(statusZh(g.release_status))}</span><h3>${esc(g.name_zh_hant||g.name_en)}</h3><div class="en">${esc(g.name_en)}</div><div class="card-release-row"><span class="card-release-icon">📅</span><span class="card-release-label">上市 / Release</span><strong class="card-release-date ${g.release_date?'':'tba'}">${esc(releaseText)}</strong></div><div class="tags">${(g.platforms||[]).slice(0,4).map(p=>`<span class="tag">${esc(p.platform)}</span>`).join('')||'<span class="tag">平台待同步</span>'}</div><div class="game-stats"><div><small>最低價</small><b>${g.price?money(g.price.current_price,g.price.currency):'—'}</b></div><div><small>評價</small><b>${g.review?.positive_percentage!=null?`${Number(g.review.positive_percentage)}%`:'—'}</b></div><div><small>Live</small><b>${g.live?Number(g.live.viewer_count).toLocaleString():'—'}</b></div></div><div class="card-actions"><button class="btn primary open-game" data-slug="${esc(g.slug)}">查看情報</button>${g.official_website_url?`<button class="btn official" data-url="${esc(g.official_website_url)}">官方 ↗</button>`:''}</div></article>`;}
-function bindCards(){document.querySelectorAll('.open-game').forEach(b=>b.onclick=e=>{e.stopPropagation();location.hash=`game/${b.dataset.slug}`});document.querySelectorAll('.official').forEach(b=>b.onclick=e=>{e.stopPropagation();window.open(b.dataset.url,'_blank','noopener,noreferrer')});}
+
+function gameCoverInner(g){
+  const title=g?.name_zh_hant||g?.name_en||'Game';
+  const fallback=esc(initials(g?.name_en||title));
+  const src=g?.cover_url?esc(g.cover_url):'';
+  return `${src?`<img class="native-cover-img" data-cover-img src="${src}" alt="${esc(title)}" loading="lazy" decoding="async">`:''}<span class="cover-fallback">${fallback}</span>`;
+}
+function closeGamePreview(){
+  document.querySelector('.game-preview-backdrop')?.remove();
+}
+async function showGamePreview(slug){
+  if(!slug)return;
+  closeGamePreview();
+  const shell=document.createElement('div');
+  shell.className='game-preview-backdrop';
+  shell.innerHTML='<div class="game-preview-modal"><div class="game-preview-loading">讀取預覽 / Loading preview…</div></div>';
+  document.body.appendChild(shell);
+  shell.addEventListener('click',e=>{if(e.target===shell)closeGamePreview();});
+  const escHandler=e=>{if(e.key==='Escape'){closeGamePreview();document.removeEventListener('keydown',escHandler);}};
+  document.addEventListener('keydown',escHandler);
+  try{
+    const {data:g,error}=await supabase.from('games').select('*').eq('slug',slug).single();
+    if(error)throw error;
+    const [pl,pr,rv,is]=await Promise.all([
+      supabase.from('game_platforms').select('platform,availability,supports_zh_hant').eq('game_id',g.id),
+      supabase.from('store_products').select('platform,store,edition,current_price,list_price,discount_percent,currency,region').eq('game_id',g.id).eq('region','TW').order('current_price',{ascending:true}).limit(5),
+      supabase.from('review_snapshots').select('source,positive_percentage,total_reviews,captured_at').eq('game_id',g.id).order('captured_at',{ascending:false}).limit(1),
+      supabase.from('game_issues').select('title_zh,title_en,issue_category,mention_count_24h,growth_24h').eq('game_id',g.id).eq('resolved',false).order('mention_count_24h',{ascending:false}).limit(3)
+    ]);
+    const product=pr.data?.[0]||null;
+    const review=rv.data?.[0]||null;
+    const platforms=(pl.data||[]).slice(0,6);
+    const issues=is.data||[];
+    const title=g.name_zh_hant||g.name_en;
+    const desc=g.description_zh_hant||g.description_en||'目前沒有簡介 / No description available.';
+    shell.innerHTML=`<div class="game-preview-modal" role="dialog" aria-modal="true" aria-label="${esc(title)} 預覽">
+      <button class="game-preview-close" type="button" aria-label="關閉預覽">×</button>
+      <div class="game-preview-hero">
+        <div class="game-preview-cover native-cover">${gameCoverInner(g)}</div>
+        <div class="game-preview-main">
+          <div class="game-preview-status"><span class="badge ${statusClass(g.release_status)}">${esc(statusZh(g.release_status))}</span></div>
+          <h2>${esc(title)}</h2>
+          <div class="game-preview-en">${esc(g.name_en||'')}</div>
+          <div class="game-preview-date">📅 <b>上市 / Release</b> ${g.release_date?fmtDate(g.release_date):'日期待定 / TBA'}</div>
+          <div class="tags">${platforms.map(x=>`<span class="tag">${esc(x.platform)}${x.supports_zh_hant?' · 繁中':''}</span>`).join('')||'<span class="tag">平台待同步</span>'}</div>
+        </div>
+      </div>
+      <p class="game-preview-desc">${esc(String(desc).slice(0,320))}</p>
+      <div class="game-preview-metrics">
+        <div><small>台灣最低價 / TW price</small><strong>${product?money(product.current_price,product.currency):'—'}</strong><span>${product?esc(product.store):'待同步'} ${product&&Number(product.discount_percent)>0?`· -${Number(product.discount_percent)}%`:''}</span></div>
+        <div><small>玩家評價 / Reviews</small><strong>${review?.positive_percentage!=null?`${Number(review.positive_percentage)}%`:'—'}</strong><span>${review?Number(review.total_reviews||0).toLocaleString()+' reviews':'待同步'}</span></div>
+        <div><small>玩家問題 / Issues</small><strong>${issues.length}</strong><span>${issues[0]?esc(issues[0].title_zh||issues[0].issue_category):'目前無主要問題'}</span></div>
+      </div>
+      <div class="game-preview-issues">${issues.map(x=>`<span>${esc(x.title_zh||x.issue_category)} · 24H ${Number(x.mention_count_24h||0).toLocaleString()}</span>`).join('')}</div>
+      <div class="game-preview-actions">
+        <button class="btn" id="preview-close">關閉 / Close</button>
+        <button class="btn primary" id="preview-full">完整情報 / Full details →</button>
+      </div>
+    </div>`;
+    shell.querySelector('.game-preview-close').onclick=closeGamePreview;
+    shell.querySelector('#preview-close').onclick=closeGamePreview;
+    shell.querySelector('#preview-full').onclick=()=>{closeGamePreview();location.hash=`game/${slug}`;};
+    bindCoverImages(shell);
+  }catch(err){
+    shell.innerHTML=`<div class="game-preview-modal"><button class="game-preview-close" type="button">×</button><div class="empty">預覽讀取失敗：${esc(err.message)}</div></div>`;
+    shell.querySelector('.game-preview-close').onclick=closeGamePreview;
+  }
+}
+function bindCoverImages(root=document){
+  root.querySelectorAll('[data-cover-img]').forEach(img=>{
+    if(img.dataset.bound==='1')return;
+    img.dataset.bound='1';
+    img.addEventListener('load',()=>img.parentElement?.classList.add('has-native-image'));
+    img.addEventListener('error',()=>{img.remove();});
+    if(img.complete&&img.naturalWidth>0)img.parentElement?.classList.add('has-native-image');
+  });
+}
+function gameCard(g){const releaseText=g.release_date?fmtDate(g.release_date):'日期待定 / TBA';return `<article class="game-card" data-game="${esc(g.slug)}"><div class="cover native-cover">${gameCoverInner(g)}</div><span class="badge ${statusClass(g.release_status)}">${esc(statusZh(g.release_status))}</span><h3>${esc(g.name_zh_hant||g.name_en)}</h3><div class="en">${esc(g.name_en)}</div><div class="card-release-row"><span class="card-release-icon">📅</span><span class="card-release-label">上市 / Release</span><strong class="card-release-date ${g.release_date?'':'tba'}">${esc(releaseText)}</strong></div><div class="tags">${(g.platforms||[]).slice(0,4).map(p=>`<span class="tag">${esc(p.platform)}</span>`).join('')||'<span class="tag">平台待同步</span>'}</div><div class="game-stats"><div><small>最低價</small><b>${g.price?money(g.price.current_price,g.price.currency):'—'}</b></div><div><small>評價</small><b>${g.review?.positive_percentage!=null?`${Number(g.review.positive_percentage)}%`:'—'}</b></div><div><small>Live</small><b>${g.live?Number(g.live.viewer_count).toLocaleString():'—'}</b></div></div><div class="card-actions"><button class="btn primary open-game" data-slug="${esc(g.slug)}">預覽 / Preview</button>${g.official_website_url?`<button class="btn official" data-url="${esc(g.official_website_url)}">官方 ↗</button>`:''}</div></article>`;}
+function bindCards(){document.querySelectorAll('.open-game').forEach(b=>{if(b.dataset.previewBound==='1')return;b.dataset.previewBound='1';b.onclick=e=>{e.stopPropagation();showGamePreview(b.dataset.slug);};});document.querySelectorAll('.official').forEach(b=>b.onclick=e=>{e.stopPropagation();window.open(b.dataset.url,'_blank','noopener,noreferrer')});bindCoverImages();}
 
 async function pageDashboard(){
   const now=new Date();
@@ -267,6 +344,7 @@ async function pageDashboard(){
         <div class="section-head"><div><h2>即將上市 / Upcoming</h2><p>依上市日期由近到遠</p></div><button class="btn ghost" data-dashboard-filter="upcoming">查看全部 →</button></div>
         <div class="dashboard-release-list">
           ${upcoming.map(g=>`<button class="dashboard-release open-game" data-slug="${esc(g.slug)}">
+            <span class="dashboard-thumb native-cover">${gameCoverInner(g)}</span>
             <span class="dashboard-release-date"><b>${g.release_date?fmtDate(g.release_date):'TBA'}</b><small>${statusZh(g.release_status)}</small></span>
             <span class="dashboard-release-name"><strong>${esc(g.name_zh_hant||g.name_en)}</strong><small>${esc(g.name_en)}</small></span>
             <span>→</span>
@@ -277,10 +355,10 @@ async function pageDashboard(){
       <div class="panel dashboard-panel">
         <div class="section-head"><div><h2>價格情報 / Price Deals</h2><p>台灣區目前折扣較高的商品</p></div><button class="btn ghost" data-route-jump="prices">價格頁 →</button></div>
         <div class="dashboard-signal-list">
-          ${prices.map(x=>`<div class="dashboard-signal">
-            <div><strong>${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong><small>${esc(x.store)} · ${esc(x.edition)}</small></div>
+          ${prices.map(x=>`<button class="dashboard-signal dashboard-signal-button open-game" data-slug="${esc(x.games?.slug)}">
+            <div class="dashboard-signal-game"><span class="dashboard-thumb native-cover">${gameCoverInner(x.games||{})}</span><span><strong>${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong><small>${esc(x.store)} · ${esc(x.edition)}</small></span></div>
             <div class="dashboard-signal-value"><b>${money(x.current_price,x.currency)}</b><span class="badge ok">-${Number(x.discount_percent)}%</span></div>
-          </div>`).join('')||'<div class="empty">目前沒有折扣資料。</div>'}
+          </button>`).join('')||'<div class="empty">目前沒有折扣資料。</div>'}
         </div>
       </div>
     </section>
@@ -474,9 +552,7 @@ async function pagePrices(){
         const cover=game.cover_url?esc(game.cover_url):'';
         const editionZh=({'Standard':'標準版','Deluxe':'豪華版','Ultimate':'終極版','Collector':'典藏版','DLC':'下載內容','Bundle':'組合包'})[x.edition]||x.edition||'版本';
         return `<article class="price-card price-card-rich">
-          <button class="price-cover open-game" data-slug="${esc(game.slug)}" aria-label="查看 ${esc(game.name_zh_hant||game.name_en)}">
-            ${cover?`<img src="${cover}" alt="${esc(game.name_zh_hant||game.name_en)}" loading="lazy" referrerpolicy="no-referrer">`:'GI'}
-          </button>
+          <button class="price-cover native-cover open-game" data-slug="${esc(game.slug)}" aria-label="預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</button>
           <div class="price-game">
             <strong>${esc(game.name_zh_hant||game.name_en)}</strong>
             <span>${esc(game.name_en||'')}</span>
@@ -511,7 +587,7 @@ async function pagePrices(){
             </div>
           </div>
           <div class="price-open">
-            <button class="btn primary open-game" data-slug="${esc(game.slug)}">遊戲情報</button>
+            <button class="btn primary open-game" data-slug="${esc(game.slug)}">預覽 / Preview</button>
             ${x.store_url?`<button class="btn" data-url="${esc(x.store_url)}">前往商店 ↗</button>`:''}
           </div>
         </article>`;
