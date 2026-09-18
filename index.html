@@ -12,6 +12,14 @@
 </head>
 <body class="notranslate">
   <div id="app"><div class="boot">Loading Game Intelligence Monitor…</div></div>
+  <script id="startup-watchdog">
+    window.__gameIntelBootWatch = setTimeout(() => {
+      const root = document.getElementById('app');
+      if (root && root.querySelector('.boot')) {
+        root.innerHTML = '<div class="boot boot-diagnostic error"><strong>網站啟動逾時 / Startup timeout</strong><span>主程式未完成載入。請重新整理；若持續發生，代表瀏覽器仍在使用舊快取或核心元件載入失敗。</span><button class="btn primary" type="button" onclick="location.reload()">重新載入 / Retry</button></div>';
+      }
+    }, 12000);
+  </script>
   <script type="module" src="./app.js?v=20260918-startupfix2"></script>
   <script type="module" src="./auto-sync.js"></script>
   <script type="module" src="./enhancements.js"></script>
