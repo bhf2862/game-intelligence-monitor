@@ -149,3 +149,15 @@
 .game-filter-summary.released-summary{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media(max-width:900px){.game-filter-summary.released-summary{grid-template-columns:1fr 1fr}.gameplay-choice-list{max-height:160px}}
 @media(max-width:720px){.gameplay-multi-head{align-items:flex-start}.gameplay-choice-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));max-height:210px}.gameplay-multi-foot{display:grid}.gameplay-multi-foot .btn{width:100%}.game-filter-summary.released-summary{grid-template-columns:1fr 1fr}}
+
+.price-preview-trigger{cursor:pointer}
+.price-preview-modal{width:min(820px,100%)}
+.price-preview-hero{display:grid;grid-template-columns:230px minmax(0,1fr);gap:16px;align-items:center;padding-right:34px}
+.price-preview-cover{height:130px;border-radius:11px}
+.price-preview-title h2{margin:7px 0 2px;font-size:21px}.price-preview-title>p{margin:0;color:var(--muted);font-size:9px}
+.price-preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:15px}
+.price-preview-grid>div{border:1px solid var(--line);background:#0d1724;border-radius:10px;padding:10px;display:grid;gap:4px;min-width:0}
+.price-preview-grid small{font-size:8px;color:var(--muted)}.price-preview-grid strong{font-size:14px;color:#dffcff}.price-preview-grid>div>span:not(.badge){font-size:8px;color:var(--muted)}
+.price-preview-comparison{margin-top:9px;border:1px solid rgba(40,215,233,.16);background:rgba(40,215,233,.045);border-radius:10px;padding:9px 10px;display:grid;gap:4px}
+.price-preview-comparison small{font-size:8px;color:var(--muted)}.price-preview-comparison strong{font-size:11px}.price-preview-comparison strong.ok{color:var(--ok)}
+@media(max-width:720px){.price-preview-hero{grid-template-columns:1fr;padding-right:28px}.price-preview-cover{height:165px}.price-preview-title h2{font-size:17px}.price-preview-grid{grid-template-columns:1fr 1fr}.price-preview-grid>div:nth-child(3){grid-column:1/-1}.price-preview-modal .game-preview-actions{grid-template-columns:1fr}.price-preview-modal .game-preview-actions .btn{width:100%}}
