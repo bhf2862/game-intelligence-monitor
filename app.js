@@ -552,11 +552,11 @@ function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
     .filter(x=>Number.isFinite(x.price)&&x.at)
     .sort((a,b)=>new Date(a.at)-new Date(b.at));
 
-  const current=Number(currentPrice);
+  const current=currentPrice==null?null:Number(currentPrice);
   const currentTime=currentAt||new Date().toISOString();
   const points=[...raw];
   const last=points.at(-1);
-  if(Number.isFinite(current)){
+  if(current!=null&&Number.isFinite(current)){
     const sameAsLast=last&&Number(last.price)===current&&Math.abs(new Date(currentTime)-new Date(last.at))<6*3600000;
     if(!sameAsLast)points.push({price:current,at:currentTime,current:true});
     else last.current=true;
@@ -569,7 +569,7 @@ function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
   const prices=points.map(x=>x.price);
   const low=Math.min(...prices);
   const lowIndex=prices.indexOf(low);
-  const currentIndex=Math.max(0,points.findIndex(x=>x.current));
+  const currentIndex=points.findIndex(x=>x.current);
   const actualCurrentIndex=currentIndex>=0?currentIndex:points.length-1;
   points[actualCurrentIndex].current=true;
 
