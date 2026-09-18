@@ -292,23 +292,51 @@ async function init(){
   }
 }
 async function checkAllowed(){
-  const runCheck=async()=>{
-    const {data,error}=await supabase.rpc('is_allowed_user');
-    if(error)console.warn('[Game Intel] allowlist RPC failed',error);
-    return {allowed:data===true,error};
+  const callAccessFunction=async(session)=>{
+    const token=session?.access_token;
+    if(!token)return {allowed:false,status:401,error:'Missing access token'};
+
+    try{
+      const response=await withTimeout(fetch(`${SUPABASE_URL}/functions/v1/check-game-access`,{
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          'apikey':SUPABASE_KEY,
+          'Authorization':`Bearer ${token}`
+        },
+        body:'{}'
+      }),8000,'Access endpoint');
+
+      let payload=null;
+      try{payload=await response.json();}catch{}
+      return {
+        allowed:response.ok&&payload?.allowed===true,
+        status:response.status,
+        error:payload?.error||(!response.ok?`HTTP ${response.status}`:'')
+      };
+    }catch(err){
+      return {allowed:false,status:0,error:err?.message||String(err)};
+    }
   };
 
-  let result=await runCheck();
+  let session=state.session;
+  let result=await callAccessFunction(session);
   if(result.allowed)return true;
+
+  console.warn('[Game Intel] explicit access check failed',result);
 
   try{
     bootMessage('Loading Game Intelligence Monitor…','登入憑證需要更新，正在重新整理 / Refreshing session…');
     const refreshed=await withTimeout(supabase.auth.refreshSession(),8000,'Session refresh');
     if(refreshed?.error)throw refreshed.error;
-    if(refreshed?.data?.session)state.session=refreshed.data.session;
+    if(refreshed?.data?.session){
+      state.session=refreshed.data.session;
+      session=refreshed.data.session;
+    }
 
-    result=await runCheck();
+    result=await callAccessFunction(session);
     if(result.allowed)return true;
+    console.warn('[Game Intel] access check after refresh failed',result);
   }catch(err){
     console.warn('[Game Intel] session refresh failed',err);
   }
