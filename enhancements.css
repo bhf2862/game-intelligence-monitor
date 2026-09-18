@@ -181,3 +181,11 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;justify-conten
 .boot-diagnostic span{font-size:11px;color:var(--muted);max-width:620px;line-height:1.5}
 .boot-diagnostic.error strong{color:#ffb3b3}
 .boot-diagnostic .btn{margin-top:6px}
+
+.query-diagnostic{border:1px solid var(--line);background:linear-gradient(180deg,#0f1a28,#0b1420);border-radius:13px;padding:11px;margin:0 0 12px}
+.query-diagnostic.ok{border-color:rgba(98,232,168,.24)}.query-diagnostic.warn{border-color:rgba(255,189,89,.3)}.query-diagnostic.danger{border-color:rgba(255,105,105,.36)}
+.query-diagnostic-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:9px}.query-diagnostic-head>div{display:grid;gap:3px}.query-diagnostic-head small{font-size:8px;color:var(--muted)}.query-diagnostic-head strong{font-size:12px}.query-diagnostic.ok .query-diagnostic-head strong{color:#a9f4d1}.query-diagnostic.warn .query-diagnostic-head strong{color:#ffe0a8}.query-diagnostic.danger .query-diagnostic-head strong{color:#ffb3b3}
+.query-diagnostic-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px}.query-diagnostic-grid>div{border:1px solid rgba(143,162,186,.12);background:rgba(7,13,21,.38);border-radius:8px;padding:7px;display:grid;gap:3px;min-width:0}.query-diagnostic-grid small,.query-diagnostic-details small{font-size:7px;color:var(--muted)}.query-diagnostic-grid strong{font-size:10px;overflow-wrap:anywhere}
+.query-diagnostic-details{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.query-diagnostic-details>div{display:grid;gap:3px;border-top:1px solid rgba(143,162,186,.1);padding-top:6px;min-width:0}.query-diagnostic-details code{font-size:8px;color:#b9c9d8;white-space:pre-wrap;overflow-wrap:anywhere}.query-error-empty{border-color:rgba(255,105,105,.2)}
+@media(max-width:1050px){.query-diagnostic-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:720px){.query-diagnostic-head{align-items:flex-start}.query-diagnostic-grid{grid-template-columns:1fr 1fr}.query-diagnostic-details{grid-template-columns:1fr}.query-diagnostic-head .btn{white-space:nowrap}}
