@@ -101,3 +101,19 @@
 .issue-card-actions{display:grid;gap:6px}.issue-card-actions .btn{white-space:nowrap}
 @media(max-width:1050px){.issue-filter-controls{grid-template-columns:1fr 1fr}.issue-filter-controls .btn{width:100%}.issue-filter-summary{grid-template-columns:1fr 100px 100px}.issue-card-actions{grid-column:1/-1;grid-template-columns:1fr 1fr}}
 @media(max-width:720px){.issue-filter-controls{grid-template-columns:1fr}.issue-filter-summary{grid-template-columns:1fr 1fr}.issue-filter-summary>div:first-child{grid-column:1/-1}.issue-filter-summary strong{white-space:normal}.issue-card-actions{grid-template-columns:1fr 1fr}}
+
+.selected-game-issue-summary{display:grid;grid-template-columns:minmax(250px,1.35fr) repeat(4,minmax(135px,1fr));gap:8px;margin:0 0 12px}
+.selected-game-identity{appearance:none;border:1px solid rgba(40,215,233,.25);background:rgba(40,215,233,.055);color:var(--text);border-radius:11px;padding:9px;display:flex;align-items:center;gap:10px;text-align:left;cursor:pointer;min-width:0}
+.selected-game-identity:hover{border-color:var(--accent)}
+.selected-game-cover{width:88px;height:54px;border-radius:8px;flex:0 0 auto}
+.selected-game-identity>span:last-child{min-width:0;display:grid;gap:2px}
+.selected-game-identity small,.selected-issue-metric small{font-size:7px;color:var(--muted)}
+.selected-game-identity strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.selected-game-identity em{font-size:8px;color:var(--muted);font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.selected-issue-metric{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),#0d1623);border-radius:11px;padding:9px 10px;display:grid;align-content:center;gap:4px;min-width:0}
+.selected-issue-metric strong{font-size:16px;color:#dffcff}
+.selected-issue-metric span{font-size:8px;color:var(--muted);line-height:1.3}
+.selected-issue-top strong{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.selected-update-time{font-size:10px!important;line-height:1.3}
+@media(max-width:1200px){.selected-game-issue-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.selected-game-identity{grid-column:1/-1}.selected-issue-top{grid-column:span 1}}
+@media(max-width:720px){.selected-game-issue-summary{grid-template-columns:1fr 1fr}.selected-game-identity{grid-column:1/-1}.selected-game-cover{width:76px;height:48px}.selected-issue-metric strong{font-size:14px}.selected-issue-top{grid-column:1/-1}.selected-update-time{font-size:9px!important}}
