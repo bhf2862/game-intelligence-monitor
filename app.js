@@ -127,19 +127,123 @@ function gameCard(g){const releaseText=g.release_date?fmtDate(g.release_date):'�
 function bindCards(){document.querySelectorAll('.open-game').forEach(b=>b.onclick=e=>{e.stopPropagation();location.hash=`game/${b.dataset.slug}`});document.querySelectorAll('.official').forEach(b=>b.onclick=e=>{e.stopPropagation();window.open(b.dataset.url,'_blank','noopener,noreferrer')});}
 
 async function pageDashboard(){
-  const since=new Date(Date.now()-24*3600e3).toISOString();
-  const [{data:changes,error:ce},{data:games,error:ge},{data:products},{data:streams}]=await Promise.all([
-    supabase.from('change_events').select('*,games(name_zh_hant,name_en,slug)').gte('detected_at',since).order('detected_at',{ascending:false}).limit(20),
-    supabase.from('games').select('*').order('updated_at',{ascending:false}).limit(9),
-    supabase.from('store_products').select('*,games(name_zh_hant,name_en,slug)').eq('region','TW').gt('discount_percent',0).order('discount_percent',{ascending:false}).limit(6),
-    supabase.from('streaming_snapshots').select('*,games(name_zh_hant,name_en,slug)').order('captured_at',{ascending:false}).limit(200)
-  ]);if(ce)throw ce;if(ge)throw ge;
-  const hydrated=await hydrateGames(games||[]);const ch=changes||[];
-  const metrics={release:ch.filter(x=>['RELEASED','PREORDER_OPEN','RELEASE_DATE_CHANGED','RELEASE_DELAYED'].includes(x.event_type)).length,price:ch.filter(x=>['PRICE_CHANGED','HISTORICAL_LOW','TARGET_PRICE_REACHED'].includes(x.event_type)).length,issue:ch.filter(x=>x.event_type==='ISSUE_SPIKE').length,stream:ch.filter(x=>x.event_type==='STREAM_SPIKE').length};
-  const latestLive=[];const seen=new Set();for(const x of streams||[]){if(!seen.has(String(x.game_id))){seen.add(String(x.game_id));latestLive.push(x)}}latestLive.sort((a,b)=>b.viewer_count-a.viewer_count);
-  pageEl().innerHTML=`${header(state.lang==='zh'?'今天有哪些遊戲值得注意？':'What changed in games today?',state.lang==='zh'?'只顯示真實資料庫中的上市、價格、評價、問題與直播情報。':'Release, pricing, review, issue and streaming intelligence from the live database.')}<section class="metrics"><article class="metric"><span>上市／預購異動</span><strong>${metrics.release}</strong><small>過去 24 小時</small></article><article class="metric"><span>重大價格異動</span><strong>${metrics.price}</strong><small>降價／歷史低價</small></article><article class="metric"><span>問題暴增</span><strong>${metrics.issue}</strong><small>玩家負評訊號</small></article><article class="metric"><span>直播暴增</span><strong>${metrics.stream}</strong><small>Twitch / YouTube</small></article></section><section class="section"><div class="section-head"><div><h2>最近更新遊戲</h2><p>資料庫中最近新增或更新</p></div></div><div class="grid">${hydrated.map(gameCard).join('')||'<div class="empty">尚無遊戲資料</div>'}</div></section><section class="two-col"><div class="panel"><div class="section-head"><div><h2>直播熱度</h2><p>每款遊戲最新快照</p></div></div>${latestLive.slice(0,8).map((x,i)=>`<div class="rank-row"><span class="rank">${String(i+1).padStart(2,'0')}</span><div><b>${esc(x.games?.name_zh_hant||x.games?.name_en||'Unknown')}</b><div class="sub">${esc(x.source)}</div></div><b>${Number(x.viewer_count).toLocaleString()}</b><span class="sub">${Number(x.channel_count).toLocaleString()} 頻道</span></div>`).join('')||'<div class="empty">尚未取得直播快照</div>'}</div><div class="panel"><div class="section-head"><div><h2>價格折扣</h2><p>台灣區官方商店商品</p></div></div>${(products||[]).map(x=>`<div class="signal-row"><div><b>${esc(x.games?.name_zh_hant||x.games?.name_en)}</b><div class="sub">${esc(x.store)} · ${esc(x.edition)}</div></div><b>${money(x.current_price,x.currency)}</b><span class="badge ok">-${Number(x.discount_percent)}%</span></div>`).join('')||'<div class="empty">目前沒有折扣資料</div>'}</div></section><div class="footer">Game Intelligence Monitor · Supabase / GitHub Pages</div>`;bindCards();
-}
+  const now=new Date();
+  const nowIso=now.toISOString();
+  const since=new Date(now.getTime()-24*3600e3).toISOString();
+  const [countsRes,upcomingRes,recentRes,priceRes,issueRes,changeRes,healthRes]=await Promise.all([
+    loadGameFilterCounts(),
+    supabase.from('games').select('*').gte('release_date',nowIso).neq('release_status','released').neq('release_status','cancelled').order('release_date',{ascending:true}).limit(6),
+    supabase.from('games').select('*').order('updated_at',{ascending:false}).limit(6),
+    supabase.from('store_products').select('*,games!inner(slug,name_en,name_zh_hant,cover_url)').eq('region','TW').gt('discount_percent',0).order('discount_percent',{ascending:false}).limit(6),
+    supabase.from('game_issues').select('*,games!inner(slug,name_en,name_zh_hant)').eq('resolved',false).order('mention_count_24h',{ascending:false}).limit(6),
+    supabase.from('change_events').select('*,games(name_zh_hant,name_en,slug)').gte('detected_at',since).order('detected_at',{ascending:false}).limit(8),
+    supabase.from('source_health').select('source_name,status,message,checked_at').in('source_name',['twitch','youtube']).order('source_name')
+  ]);
+  if(upcomingRes.error)throw upcomingRes.error;
+  if(recentRes.error)throw recentRes.error;
+  const counts=countsRes||{};
+  const upcoming=await hydrateGames(upcomingRes.data||[]);
+  const recent=await hydrateGames(recentRes.data||[]);
+  const prices=priceRes.data||[];
+  const issues=issueRes.data||[];
+  const changes=changeRes.data||[];
+  const health=healthRes.data||[];
+  const twitch=health.find(x=>x.source_name==='twitch');
+  const youtube=health.find(x=>x.source_name==='youtube');
 
+  const quick=[
+    ['all','🎮','全部遊戲','All games',counts.all||0],
+    ['upcoming','📅','即將上市','Upcoming',counts.upcoming||0],
+    ['released','✓','已上市','Released',counts.released||0],
+    ['preorder','🛒','預購中','Pre-order',counts.preorder||0],
+    ['announced','📣','已公布','Announced',counts.announced||0],
+    ['tba','?','日期待定','TBA',counts.tba||0]
+  ];
+
+  const healthLabel=x=>!x?'尚未設定 / Not configured':x.status==='ok'?'正常 / Connected':x.status==='credential_required'?'需要 API 憑證 / Credentials required':esc(x.status);
+  const healthClass=x=>x?.status==='ok'?'ok':x?.status==='credential_required'?'warn':'';
+
+  pageEl().innerHTML=`
+    ${header('遊戲情報總覽 / Dashboard','先看最重要的：上市、價格、玩家問題、直播與重大變化。')}
+    <section class="dashboard-kpis">
+      ${quick.map(([id,icon,zh,en,count])=>`<button class="dashboard-kpi" data-dashboard-filter="${id}">
+        <span class="dashboard-kpi-icon">${icon}</span>
+        <span><small>${zh} / ${en}</small><strong>${Number(count).toLocaleString()}</strong></span>
+        <i>→</i>
+      </button>`).join('')}
+    </section>
+
+    <section class="dashboard-shortcuts">
+      <button data-route-jump="calendar"><span>◷</span><b>上市名單</b><small>Release Calendar</small></button>
+      <button data-route-jump="prices"><span>＄</span><b>價格追蹤</b><small>Price Tracker</small></button>
+      <button data-route-jump="issues"><span>⚠</span><b>玩家問題</b><small>Issues</small></button>
+      <button data-route-jump="live"><span>◉</span><b>直播熱度</b><small>Live Trends</small></button>
+    </section>
+
+    <section class="dashboard-two">
+      <div class="panel dashboard-panel">
+        <div class="section-head"><div><h2>即將上市 / Upcoming</h2><p>依上市日期由近到遠</p></div><button class="btn ghost" data-dashboard-filter="upcoming">查看全部 →</button></div>
+        <div class="dashboard-release-list">
+          ${upcoming.map(g=>`<button class="dashboard-release open-game" data-slug="${esc(g.slug)}">
+            <span class="dashboard-release-date"><b>${g.release_date?fmtDate(g.release_date):'TBA'}</b><small>${statusZh(g.release_status)}</small></span>
+            <span class="dashboard-release-name"><strong>${esc(g.name_zh_hant||g.name_en)}</strong><small>${esc(g.name_en)}</small></span>
+            <span>→</span>
+          </button>`).join('')||'<div class="empty">目前沒有已確認日期的即將上市遊戲。</div>'}
+        </div>
+      </div>
+
+      <div class="panel dashboard-panel">
+        <div class="section-head"><div><h2>價格情報 / Price Deals</h2><p>台灣區目前折扣較高的商品</p></div><button class="btn ghost" data-route-jump="prices">價格頁 →</button></div>
+        <div class="dashboard-signal-list">
+          ${prices.map(x=>`<div class="dashboard-signal">
+            <div><strong>${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong><small>${esc(x.store)} · ${esc(x.edition)}</small></div>
+            <div class="dashboard-signal-value"><b>${money(x.current_price,x.currency)}</b><span class="badge ok">-${Number(x.discount_percent)}%</span></div>
+          </div>`).join('')||'<div class="empty">目前沒有折扣資料。</div>'}
+        </div>
+      </div>
+    </section>
+
+    <section class="dashboard-two">
+      <div class="panel dashboard-panel">
+        <div class="section-head"><div><h2>玩家問題 / Player Issues</h2><p>24 小時提及量最高</p></div><button class="btn ghost" data-route-jump="issues">問題頁 →</button></div>
+        <div class="dashboard-signal-list">
+          ${issues.map(x=>`<button class="dashboard-signal dashboard-signal-button open-game" data-slug="${esc(x.games?.slug)}">
+            <div><strong>${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong><small>${esc(x.title_zh||x.issue_category)} / ${esc(x.title_en||x.issue_category)}</small></div>
+            <div class="dashboard-signal-value"><b>24H ${Number(x.mention_count_24h||0).toLocaleString()}</b><span class="badge ${x.official_confirmed?'ok':''}">${x.official_confirmed?'官方確認':'追蹤中'}</span></div>
+          </button>`).join('')||'<div class="empty">目前沒有達門檻的玩家問題。</div>'}
+        </div>
+      </div>
+
+      <div class="panel dashboard-panel">
+        <div class="section-head"><div><h2>直播資料 / Live Data</h2><p>不顯示假數字，只顯示真實 API 狀態</p></div><button class="btn ghost" data-route-jump="live">直播頁 →</button></div>
+        <div class="dashboard-health">
+          <div><span class="health-service">Twitch</span><span class="badge ${healthClass(twitch)}">${healthLabel(twitch)}</span><small>${esc(twitch?.message||'等待串接官方 API')}</small></div>
+          <div><span class="health-service">YouTube</span><span class="badge ${healthClass(youtube)}">${healthLabel(youtube)}</span><small>${esc(youtube?.message||'等待串接官方 API')}</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section dashboard-section">
+      <div class="section-head"><div><h2>最近更新遊戲 / Recently Updated</h2><p>卡片外直接查看上市日期、價格、評價與直播</p></div><button class="btn ghost" data-dashboard-filter="all">全部遊戲 →</button></div>
+      <div class="grid">${recent.map(gameCard).join('')||'<div class="empty">尚無遊戲資料</div>'}</div>
+    </section>
+
+    <section class="panel dashboard-panel dashboard-changes">
+      <div class="section-head"><div><h2>24 小時重大變化 / Changes</h2><p>上市、價格、評價、問題與直播事件</p></div><button class="btn ghost" data-route-jump="changes">全部變化 →</button></div>
+      ${changes.map(x=>`<div class="timeline-row dashboard-change-row"><div><span class="badge ${x.severity==='critical'?'danger':x.severity==='high'?'warn':''}">${esc(eventZh(x.event_type))}</span><small class="sub">${fmtDate(x.detected_at,true)}</small></div><div><b>${esc(x.games?.name_zh_hant||x.games?.name_en||'系統事件')}</b><small class="sub">${esc(x.games?.name_en||'')}</small></div></div>`).join('')||'<div class="empty">過去 24 小時沒有達門檻的重大變化。</div>'}
+    </section>
+    <div class="footer">Game Intelligence Monitor · Supabase / GitHub Pages</div>
+  `;
+
+  bindCards();
+  document.querySelectorAll('[data-dashboard-filter]').forEach(b=>b.onclick=()=>{
+    state.gameFilter=b.dataset.dashboardFilter;
+    localStorage.setItem('game-intel-game-filter',state.gameFilter);
+    state.page=0;
+    location.hash='games';
+  });
+  document.querySelectorAll('[data-route-jump]').forEach(b=>b.onclick=()=>{location.hash=b.dataset.routeJump});
+}
 async function pageGames(){
   const counts=await loadGameFilterCounts();
   let q=supabase.from('games').select('*',{count:'exact'});
