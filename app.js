@@ -555,9 +555,10 @@ function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
   const current=currentPrice==null?null:Number(currentPrice);
   const currentTime=currentAt||new Date().toISOString();
   const points=[...raw];
-  const last=points.at(-1);
+  const last=points.length?points[points.length-1]:null;
+
   if(current!=null&&Number.isFinite(current)){
-    const sameAsLast=last&&Number(last.price)===current&&Math.abs(new Date(currentTime)-new Date(last.at))<6*3600000;
+    const sameAsLast=last&&Number(last.price)===current&&Math.abs(new Date(currentTime).getTime()-new Date(last.at).getTime())<6*3600000;
     if(!sameAsLast)points.push({price:current,at:currentTime,current:true});
     else last.current=true;
   }
@@ -569,34 +570,81 @@ function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
   const prices=points.map(x=>x.price);
   const low=Math.min(...prices);
   const lowIndex=prices.indexOf(low);
-  const currentIndex=points.findIndex(x=>x.current);
-  const actualCurrentIndex=currentIndex>=0?currentIndex:points.length-1;
-  points[actualCurrentIndex].current=true;
+  let currentIndex=points.findIndex(x=>x.current);
+  if(currentIndex<0)currentIndex=points.length-1;
+  points[currentIndex].current=true;
 
-  const width=760,height=250,left=54,right=26,top=28,bottom=44;
+  const width=760,height=250,left=58,right=28,top=30,bottom=46;
   const innerW=width-left-right,innerH=height-top-bottom;
-  const times=points.map(x=>new Date(x.at).getTime());
+  const times=points.map(x=>new Date(x.at).getTime()).map((t,i)=>Number.isFinite(t)?t:i);
   const minT=Math.min(...times),maxT=Math.max(...times);
   const minP=Math.min(...prices),maxP=Math.max(...prices);
   const rangeP=Math.max(1,maxP-minP);
   const padP=Math.max(1,rangeP*.12);
   const yMin=Math.max(0,minP-padP),yMax=maxP+padP;
-  const x=(i)=>{
+
+  const x=i=>{
     if(points.length===1||minT===maxT)return left+innerW/2;
     return left+((times[i]-minT)/(maxT-minT))*innerW;
   };
-  const y=(v)=>top+innerH-((v-yMin)/(yMax-yMin))*innerH;
-  const poly=points.map((p,i)=>`${x(i).toFixed(1)},${y(p.price).toFixed(1)}`).join(' ');
+  const y=v=>top+innerH-((v-yMin)/(yMax-yMin))*innerH;
+  const linePoints=points.map((p,i)=>`${x(i).toFixed(1)},${y(p.price).toFixed(1)}`).join(' ');
+  const formatPrice=v=>money(Math.round(Number(v)*100)/100,currency);
+  const formatDate=v=>new Intl.DateTimeFormat('zh-TW',{month:'2-digit',day:'2-digit'}).format(new Date(v));
+  const formatDateTime=v=>new Intl.DateTimeFormat('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(v));
 
-  const formatAxisPrice=v=>{
-    if(currency==='TWD')return 'NT
+  const grid=[0,.25,.5,.75,1].map(r=>{
+    const gy=top+innerH-innerH*r;
+    const val=yMin+(yMax-yMin)*r;
+    return `<line x1="${left}" y1="${gy}" x2="${width-right}" y2="${gy}" class="price-chart-grid"/><text x="${left-8}" y="${gy+3}" text-anchor="end" class="price-chart-axis">${esc(formatPrice(val))}</text>`;
+  }).join('');
+
+  const tickIndexes=[0,Math.floor((points.length-1)/2),points.length-1].filter((v,i,a)=>a.indexOf(v)===i);
+  const labels=tickIndexes.map(i=>`<text x="${x(i)}" y="${height-13}" text-anchor="middle" class="price-chart-axis">${esc(formatDate(points[i].at))}</text>`).join('');
+
+  const lowPoint=points[lowIndex];
+  const currentPoint=points[currentIndex];
+  const samePoint=lowIndex===currentIndex&&Number(lowPoint.price)===Number(currentPoint.price);
+  const dots=points.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p.price)}" r="2.5" class="price-chart-dot"/>`).join('');
+
+  const lowMarker=`<line x1="${x(lowIndex)}" y1="${top}" x2="${x(lowIndex)}" y2="${top+innerH}" class="price-chart-low-line"/><circle cx="${x(lowIndex)}" cy="${y(lowPoint.price)}" r="5.5" class="price-chart-low"/><text x="${Math.max(left+82,Math.min(width-right-82,x(lowIndex)))}" y="${Math.max(16,y(lowPoint.price)-12)}" text-anchor="middle" class="price-chart-low-label">${samePoint?'目前＝歷史低 / Current = Low':'歷史最低 / Historical Low'} · ${esc(formatPrice(lowPoint.price))}</text>`;
+
+  const currentMarker=samePoint?'':`<line x1="${x(currentIndex)}" y1="${top}" x2="${x(currentIndex)}" y2="${top+innerH}" class="price-chart-current-line"/><circle cx="${x(currentIndex)}" cy="${y(currentPoint.price)}" r="5.5" class="price-chart-current"/><text x="${Math.max(left+74,Math.min(width-right-74,x(currentIndex)))}" y="${Math.min(top+innerH-8,y(currentPoint.price)+20)}" text-anchor="middle" class="price-chart-current-label">目前 / Current · ${esc(formatPrice(currentPoint.price))}</text>`;
+
+  const note=points.length===1
+    ? '<div class="price-chart-note">目前只有 1 筆價格快照，歷史資料仍在累積 / Only one snapshot; history is still accumulating.</div>'
+    : `<div class="price-chart-note">共 ${points.length.toLocaleString()} 個價格時間點 · 歷史最低 ${esc(formatPrice(low))}（${esc(formatDateTime(lowPoint.at))}）</div>`;
+
+  return `<section class="price-history-chart-panel">
+    <div class="section-head price-history-chart-head">
+      <div><h2>價格歷史趨勢 / Price History</h2><p>依資料庫實際價格快照繪製，不補估計資料。</p></div>
+      <div class="price-chart-legend"><span class="low">● 歷史最低</span><span class="current">● 目前價格</span></div>
+    </div>
+    <div class="price-chart-wrap">
+      <svg class="price-history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="價格歷史趨勢，歷史最低 ${esc(formatPrice(low))}，目前價格 ${esc(formatPrice(currentPoint.price))}">
+        ${grid}
+        ${points.length>1?`<polyline points="${linePoints}" class="price-chart-line"/>`:''}
+        ${dots}
+        ${lowMarker}
+        ${currentMarker}
+        ${labels}
+      </svg>
+    </div>
+    ${note}
+  </section>`;
+}
+
+async function showPricePreview(productId){
   if(!productId)return;
   closeGamePreview();
+
   const shell=document.createElement('div');
   shell.className='game-preview-backdrop';
-  shell.innerHTML='<div class="game-preview-modal price-preview-modal"><div class="game-preview-loading">讀取價格預覽 / Loading price preview…</div></div>';
+  shell.innerHTML='<div class="game-preview-modal price-preview-modal"><button class="game-preview-close" type="button" aria-label="關閉預覽">×</button><div class="game-preview-loading">讀取價格預覽 / Loading price preview…</div></div>';
   document.body.appendChild(shell);
+  shell.querySelector('.game-preview-close').onclick=closeGamePreview;
   shell.addEventListener('click',e=>{if(e.target===shell)closeGamePreview();});
+
   try{
     const {data:p,error}=await supabase.from('store_products')
       .select('*,games!inner(id,slug,name_en,name_zh_hant,cover_url,release_date,release_status,gameplay_tags)')
@@ -604,28 +652,29 @@ function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
       .single();
     if(error)throw error;
 
+    const g=p.games||{};
+    const title=g.name_zh_hant||g.name_en||'Game';
+
     const {data:history,error:histError}=await supabase.from('price_history')
       .select('price,list_price,discount_percent,currency,captured_at')
       .eq('product_id',Number(productId))
       .order('captured_at',{ascending:true});
-    if(histError)throw histError;
+    const hist=histError?[]:(history||[]);
 
-    const g=p.games||{};
-    const hist=history||[];
     const prices=hist.map(x=>Number(x.price)).filter(Number.isFinite);
     const discounts=hist.map(x=>Number(x.discount_percent||0)).filter(x=>Number.isFinite(x)&&x>0);
     const previousHistoricalLow=prices.length?Math.min(...prices):null;
     const historicalBestDiscount=discounts.length?Math.max(...discounts):null;
-    const current=Number(p.current_price);
+    const current=p.current_price==null?null:Number(p.current_price);
     const list=p.list_price==null?null:Number(p.list_price);
     const discount=Number(p.discount_percent||0);
-    const historicalLow=Number.isFinite(current)
+    const historicalLow=current!=null&&Number.isFinite(current)
       ? (previousHistoricalLow==null?current:Math.min(previousHistoricalLow,current))
       : previousHistoricalLow;
 
     let comparison='歷史資料累積中 / History accumulating';
     let compareClass='';
-    if(previousHistoricalLow!=null&&Number.isFinite(current)){
+    if(previousHistoricalLow!=null&&current!=null&&Number.isFinite(current)){
       if(current<previousHistoricalLow){comparison='🔥 新歷史低價 / New historical low';compareClass='ok';}
       else if(current===previousHistoricalLow){comparison='＝ 歷史最低價 / Matches historical low';compareClass='ok';}
       else comparison=`目前比歷史最低高 ${money(current-previousHistoricalLow,p.currency)}`;
@@ -634,15 +683,21 @@ function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
     const offerEnd=(()=>{
       if(discount<=0)return {main:'目前無優惠',sub:'No active offer'};
       if(!p.sale_end)return {main:'期限未提供',sub:'Official end date unavailable'};
-      const end=new Date(p.sale_end);
-      const ms=end-Date.now();
+      const ms=new Date(p.sale_end).getTime()-Date.now();
       if(ms<=0)return {main:'優惠已結束',sub:fmtDate(p.sale_end,true)};
       const hours=Math.max(0,Math.floor(ms/3600000));
       const days=Math.floor(hours/24);
       return {main:days>0?`剩 ${days} 天 ${hours%24} 小時`:`剩 ${hours} 小時`,sub:`至 ${fmtDate(p.sale_end,true)}`};
     })();
 
-    const title=g.name_zh_hant||g.name_en||'Game';
+    let chartHtml='';
+    try{
+      chartHtml=renderPriceHistoryTrend(hist,p.current_price,p.updated_at,p.currency);
+    }catch(chartError){
+      console.error('price history chart failed',chartError);
+      chartHtml='<section class="price-history-chart-panel"><div class="empty">價格歷史圖暫時無法顯示，但價格預覽仍可使用。</div></section>';
+    }
+
     shell.innerHTML=`<div class="game-preview-modal price-preview-modal" role="dialog" aria-modal="true" aria-label="${esc(title)} 價格預覽">
       <button class="game-preview-close" type="button" aria-label="關閉預覽">×</button>
       <div class="price-preview-hero">
@@ -660,8 +715,8 @@ function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
       </div>
 
       <div class="price-preview-grid">
-        <div><small>原價 / List</small><strong>${money(list,p.currency)}</strong></div>
-        <div><small>現價 / Current</small><strong>${money(p.current_price,p.currency)}</strong>${discount>0?`<span class="badge ok">-${discount}%</span>`:''}</div>
+        <div><small>原價 / List</small><strong>${list==null?'—':money(list,p.currency)}</strong></div>
+        <div><small>現價 / Current</small><strong>${current==null?'—':money(current,p.currency)}</strong>${discount>0?`<span class="badge ok">-${discount}%</span>`:''}</div>
         <div><small>優惠期限 / Offer ends</small><strong>${esc(offerEnd.main)}</strong><span>${esc(offerEnd.sub)}</span></div>
         <div><small>歷史最低 / Historical low</small><strong>${historicalLow==null?'—':money(historicalLow,p.currency)}</strong></div>
         <div><small>歷史最大折扣 / Best discount</small><strong>${historicalBestDiscount==null?'—':`-${historicalBestDiscount}%`}</strong></div>
@@ -673,7 +728,7 @@ function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
         <strong class="${compareClass}">${esc(comparison)}</strong>
       </div>
 
-      ${renderPriceHistoryTrend(hist,p.current_price,p.updated_at,p.currency)}
+      ${chartHtml}
 
       ${Array.isArray(g.gameplay_tags)&&g.gameplay_tags.length?`<div class="game-preview-gameplay"><small>玩法分類 / Gameplay</small><div class="gameplay-row">${renderGameplayTags(g,8)}</div></div>`:''}
 
@@ -691,10 +746,11 @@ function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
     bindCoverImages(shell);
     bindCards();
   }catch(err){
-    shell.innerHTML=`<div class="game-preview-modal price-preview-modal"><button class="game-preview-close" type="button">×</button><div class="empty">價格預覽讀取失敗：${esc(err?.message||err)}</div></div>`;
+    shell.innerHTML=`<div class="game-preview-modal price-preview-modal"><button class="game-preview-close" type="button">×</button><div class="empty">價格預覽讀取失敗：${esc(err?.message||String(err))}</div></div>`;
     shell.querySelector('.game-preview-close').onclick=closeGamePreview;
   }
 }
+
 function bindPricePreviews(){
   const page=pageEl();
   if(!page||page.dataset.pricePreviewDelegated==='1')return;
