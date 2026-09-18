@@ -630,6 +630,90 @@ async function pagePrices(){
   bindCards();
   document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));
 }
+
+async function loadIssueTrend(gameId){
+  try{
+    const {data,error}=await supabase.functions.invoke('sync-game-issue-trend',{body:{game_id:Number(gameId)}});
+    if(!error&&data?.ok&&Array.isArray(data.hours))return {data,message:'',live:true};
+    const message=data?.error||error?.message||'即時趨勢暫時無法更新';
+    const fallback=await loadStoredIssueTrend(gameId);
+    return fallback.data?{data:fallback.data,message:`${message}；顯示最近已保存資料`,live:false}:{data:null,message,live:false};
+  }catch(err){
+    const fallback=await loadStoredIssueTrend(gameId);
+    return fallback.data?{data:fallback.data,message:'即時更新失敗；顯示最近已保存資料',live:false}:{data:null,message:err?.message||'趨勢讀取失敗',live:false};
+  }
+}
+async function loadStoredIssueTrend(gameId){
+  const hourMs=3600000;
+  const currentHour=Math.floor(Date.now()/hourMs)*hourMs;
+  const startHour=currentHour-23*hourMs;
+  const {data,error}=await supabase.from('issue_hourly_mentions')
+    .select('bucket_start,mention_count,issue_category,sample_size,captured_at')
+    .eq('game_id',Number(gameId))
+    .gte('bucket_start',new Date(startHour).toISOString())
+    .order('bucket_start',{ascending:true});
+  if(error||!(data||[]).length)return {data:null,error};
+  const byHour=new Map();
+  let sampleReviews=0;
+  for(const row of data||[]){
+    const key=new Date(row.bucket_start).toISOString();
+    byHour.set(key,(byHour.get(key)||0)+Number(row.mention_count||0));
+    sampleReviews=Math.max(sampleReviews,Number(row.sample_size||0));
+  }
+  const hours=Array.from({length:24},(_,i)=>{
+    const bucket_start=new Date(startHour+i*hourMs).toISOString();
+    return {bucket_start,total:byHour.get(bucket_start)||0,categories:{}};
+  });
+  const peak=hours.reduce((best,row)=>row.total>best.total?row:best,hours[0]);
+  return {data:{ok:true,source:'Stored hourly issue data',sample_reviews:sampleReviews,hours,peak}};
+}
+function issueTrendTimeLabel(value){
+  if(!value)return '—';
+  return new Intl.DateTimeFormat('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
+}
+function issueTrendHourLabel(value){
+  return new Intl.DateTimeFormat('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
+}
+function renderIssueTrendChart(trend,message=''){
+  const hours=Array.isArray(trend?.hours)?trend.hours:[];
+  if(!hours.length)return `<section class="issue-trend-panel"><div class="empty">${esc(message||'目前沒有 24 小時趨勢資料。')}</div></section>`;
+  const totals=hours.map(x=>Number(x.total||0));
+  const rawMax=Math.max(...totals,0);
+  const max=Math.max(1,rawMax);
+  const width=760,height=230,left=42,right=18,top=24,bottom=38;
+  const innerW=width-left-right,innerH=height-top-bottom;
+  const x=i=>left+(hours.length<=1?0:(i/(hours.length-1))*innerW);
+  const y=v=>top+innerH-(Number(v||0)/max)*innerH;
+  const points=hours.map((h,i)=>`${x(i).toFixed(1)},${y(h.total).toFixed(1)}`).join(' ');
+  const peakIndex=totals.indexOf(rawMax);
+  const peak=hours[Math.max(0,peakIndex)]||hours[0];
+  const peakX=x(Math.max(0,peakIndex)),peakY=y(peak.total);
+  const grid=[0,.25,.5,.75,1].map(r=>{
+    const gy=top+innerH-innerH*r;
+    const val=Math.round(max*r);
+    return `<line x1="${left}" y1="${gy}" x2="${width-right}" y2="${gy}" class="issue-chart-grid"/><text x="${left-8}" y="${gy+3}" text-anchor="end" class="issue-chart-axis">${val}</text>`;
+  }).join('');
+  const labels=hours.map((h,i)=>i%4===0||i===hours.length-1?`<text x="${x(i)}" y="${height-12}" text-anchor="middle" class="issue-chart-axis">${esc(issueTrendHourLabel(h.bucket_start))}</text>`:'').join('');
+  const area=`${left},${top+innerH} ${points} ${width-right},${top+innerH}`;
+  const peakText=rawMax>0?`${esc(issueTrendHourLabel(peak.bucket_start))} · ${Number(peak.total).toLocaleString()}`:'尚無提及';
+  return `<section class="issue-trend-panel">
+    <div class="section-head issue-trend-head">
+      <div><h2>24 小時問題提及趨勢 / 24H Mentions</h2><p>依最近 Steam 負評樣本逐小時統計；同一則評論若符合多個問題類型，會計入多個提及。</p></div>
+      <div class="issue-peak-card"><small>高峰時間 / Peak</small><strong>${rawMax>0?esc(issueTrendTimeLabel(peak.bucket_start)):'—'}</strong><span>${rawMax.toLocaleString()} 次提及</span></div>
+    </div>
+    ${message?`<div class="issue-trend-note">${esc(message)}</div>`:''}
+    <div class="issue-trend-meta"><span>樣本負評 / Sample reviews <b>${Number(trend.sample_reviews||0).toLocaleString()}</b></span><span>資料來源 / Source <b>${esc(trend.source||'Steam')}</b></span></div>
+    <div class="issue-chart-wrap">
+      <svg class="issue-trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="最近 24 小時問題提及量趨勢，高峰 ${peakText}">
+        <polygon points="${area}" class="issue-chart-area"/>
+        ${grid}
+        <polyline points="${points}" class="issue-chart-line"/>
+        ${rawMax>0?`<line x1="${peakX}" y1="${top}" x2="${peakX}" y2="${top+innerH}" class="issue-chart-peak-line"/><circle cx="${peakX}" cy="${peakY}" r="5" class="issue-chart-peak"/><text x="${Math.min(width-right-70,Math.max(left+70,peakX))}" y="${Math.max(15,peakY-10)}" text-anchor="middle" class="issue-chart-peak-label">${peakText}</text>`:''}
+        ${labels}
+      </svg>
+    </div>
+  </section>`;
+}
 async function pageIssues(){
   const selectFields='*,games!inner(id,slug,name_en,name_zh_hant,cover_url)';
   const optionPromise=supabase.from('game_issues')
@@ -714,6 +798,13 @@ async function pageIssues(){
         return latest;
       },null)
     : null;
+  let selectedTrend=null;
+  let selectedTrendMessage='';
+  if(currentGame){
+    const trendResult=await loadIssueTrend(state.issueGame);
+    selectedTrend=trendResult.data;
+    selectedTrendMessage=trendResult.message||'';
+  }
 
   pageEl().innerHTML=`${header('玩家問題 / Issues','可用中文或英文遊戲名稱搜尋，也能直接篩選某款遊戲查看它的所有未解決問題。')}
     <section class="issue-filter-panel">
@@ -768,6 +859,7 @@ async function pageIssues(){
         <span>${selectedLatest?'最後問題活動時間':'尚無更新時間'}</span>
       </div>
     </section>`:''}
+    ${currentGame?renderIssueTrendChart(selectedTrend,selectedTrendMessage):''}
     <div class="issue-list">
       ${rows.map(x=>`<article class="issue-game-card">
         <button class="issue-game-preview open-game" data-slug="${esc(x.games?.slug)}" aria-label="預覽 ${esc(x.games?.name_zh_hant||x.games?.name_en)}">
