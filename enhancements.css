@@ -125,3 +125,13 @@
 .issue-chart-wrap{width:100%;overflow-x:auto}.issue-trend-chart{width:100%;min-width:620px;height:auto;display:block}
 .issue-chart-grid{stroke:rgba(143,162,186,.12);stroke-width:1}.issue-chart-axis{fill:#71859a;font-size:9px}.issue-chart-area{fill:rgba(40,215,233,.07)}.issue-chart-line{fill:none;stroke:#28d7e9;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.issue-chart-peak-line{stroke:rgba(255,189,89,.38);stroke-width:1;stroke-dasharray:4 4}.issue-chart-peak{fill:#ffbd59;stroke:#0c1521;stroke-width:3}.issue-chart-peak-label{fill:#ffe0a8;font-size:10px;font-weight:800}
 @media(max-width:720px){.issue-trend-panel{padding:9px}.issue-trend-head{display:grid;gap:8px}.issue-peak-card{min-width:0;width:100%}.issue-trend-chart{min-width:560px}.issue-trend-meta{display:grid;grid-template-columns:1fr}.issue-trend-meta span{border-radius:7px}}
+
+.gameplay-row{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.gameplay-chip{display:inline-flex;align-items:center;border:1px solid rgba(155,118,255,.24);background:rgba(155,118,255,.07);color:#d4c5ff;border-radius:999px;padding:3px 6px;font-size:8px;line-height:1.2;cursor:pointer}
+.gameplay-chip:hover{border-color:#9b76ff;background:rgba(155,118,255,.12)}
+.game-card .gameplay-row{margin-top:-2px}
+.gameplay-filter-box{display:grid;gap:4px;min-width:190px}.gameplay-filter-box>span{font-size:8px;color:var(--muted)}
+.gameplay-toolbar{align-items:end}
+.game-preview-gameplay{margin:8px 0}.game-preview-gameplay>small,.game-detail-gameplay>small{display:block;margin-bottom:5px;font-size:8px;color:var(--muted)}
+.game-detail-gameplay{margin-top:10px}
+@media(max-width:720px){.gameplay-filter-box{min-width:100%;width:100%}.gameplay-toolbar{display:grid;grid-template-columns:1fr 1fr}.gameplay-toolbar .gameplay-filter-box{grid-column:1/-1}.gameplay-toolbar input{grid-column:1/-1}.gameplay-chip{font-size:7px}}
