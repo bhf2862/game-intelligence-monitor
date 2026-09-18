@@ -161,3 +161,14 @@
 .price-preview-comparison{margin-top:9px;border:1px solid rgba(40,215,233,.16);background:rgba(40,215,233,.045);border-radius:10px;padding:9px 10px;display:grid;gap:4px}
 .price-preview-comparison small{font-size:8px;color:var(--muted)}.price-preview-comparison strong{font-size:11px}.price-preview-comparison strong.ok{color:var(--ok)}
 @media(max-width:720px){.price-preview-hero{grid-template-columns:1fr;padding-right:28px}.price-preview-cover{height:165px}.price-preview-title h2{font-size:17px}.price-preview-grid{grid-template-columns:1fr 1fr}.price-preview-grid>div:nth-child(3){grid-column:1/-1}.price-preview-modal .game-preview-actions{grid-template-columns:1fr}.price-preview-modal .game-preview-actions .btn{width:100%}}
+
+.price-history-chart-panel{margin-top:10px;border:1px solid var(--line);background:linear-gradient(180deg,#0d1724,#0b1420);border-radius:11px;padding:10px;overflow:hidden}
+.price-history-chart-head{align-items:center;margin-bottom:4px}.price-history-chart-head h2{font-size:12px}.price-history-chart-head p{font-size:8px}
+.price-chart-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:8px}.price-chart-legend .low{color:#ffbd59}.price-chart-legend .current{color:#62e8a8}
+.price-chart-wrap{width:100%;overflow-x:auto}.price-history-chart{width:100%;min-width:620px;height:auto;display:block}
+.price-chart-grid{stroke:rgba(143,162,186,.12);stroke-width:1}.price-chart-axis{fill:#71859a;font-size:9px}
+.price-chart-line{fill:none;stroke:#28d7e9;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.price-chart-dot{fill:#8fcad0}
+.price-chart-low-line{stroke:rgba(255,189,89,.35);stroke-width:1;stroke-dasharray:4 4}.price-chart-low{fill:#ffbd59;stroke:#0b1420;stroke-width:3}.price-chart-low-label{fill:#ffe0a8;font-size:9px;font-weight:800}
+.price-chart-current-line{stroke:rgba(98,232,168,.32);stroke-width:1;stroke-dasharray:4 4}.price-chart-current{fill:#62e8a8;stroke:#0b1420;stroke-width:3}.price-chart-current-label{fill:#a9f4d1;font-size:9px;font-weight:800}
+.price-chart-note{margin-top:5px;color:var(--muted);font-size:8px}
+@media(max-width:720px){.price-history-chart-panel{padding:8px}.price-history-chart-head{display:grid;gap:5px}.price-history-chart{min-width:560px}.price-chart-legend{justify-content:flex-start}}
