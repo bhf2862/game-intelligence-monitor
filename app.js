@@ -862,14 +862,12 @@ async function pagePrice(productId){
       ${Array.isArray(g.gameplay_tags)&&g.gameplay_tags.length?`<div class="game-preview-gameplay"><small>玩法分類 / Gameplay</small><div class="gameplay-row">${renderGameplayTags(g,8)}</div></div>`:''}
 
       <div class="game-preview-actions">
-        <button class="btn" id="price-detail-back">← 返回價格 / Back to Prices</button>
-        <button class="btn" id="price-detail-game">遊戲情報 / Game details</button>
+        <a class="btn" href="#prices">← 返回價格 / Back to Prices</a>
+        <a class="btn" href="#game/${esc(g.slug)}">遊戲情報 / Game details</a>
         ${p.store_url?`<button class="btn primary" id="price-detail-store">前往商店 / Store ↗</button>`:''}
       </div>
     </section>`;
 
-  document.querySelector('#price-detail-back').onclick=()=>{location.hash='prices';};
-  document.querySelector('#price-detail-game').onclick=()=>{location.hash=`game/${g.slug}`;};
   document.querySelector('#price-detail-store')?.addEventListener('click',()=>window.open(p.store_url,'_blank','noopener,noreferrer'));
   bindCoverImages(pageEl());
   bindCards();
@@ -981,7 +979,7 @@ async function pagePrices(){
         const cover=game.cover_url?esc(game.cover_url):'';
         const editionZh=({'Standard':'標準版','Deluxe':'豪華版','Ultimate':'終極版','Collector':'典藏版','DLC':'下載內容','Bundle':'組合包'})[x.edition]||x.edition||'版本';
         return `<article class="price-card price-card-rich">
-          <button type="button" class="price-cover native-cover price-preview-trigger" data-price-preview="${esc(x.id)}" aria-label="價格預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</button>
+          <a class="price-cover native-cover price-preview-link" href="#price/${esc(x.id)}" aria-label="價格預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</a>
           <div class="price-game">
             <strong>${esc(game.name_zh_hant||game.name_en)}</strong>
             <span>${esc(game.name_en||'')}</span>
@@ -1016,14 +1014,13 @@ async function pagePrices(){
             </div>
           </div>
           <div class="price-open">
-            <button type="button" class="btn primary price-preview-trigger" data-price-preview="${esc(x.id)}">價格預覽 / Price Preview</button>
+            <a class="btn primary price-preview-link" href="#price/${esc(x.id)}">價格預覽 / Price Preview</a>
             ${x.store_url?`<button class="btn" data-url="${esc(x.store_url)}">前往商店 ↗</button>`:''}
           </div>
         </article>`;
       }).join('')||'<div class="empty">尚無價格資料</div>'}
     </div>`;
   bindCards();
-  bindPricePreviews();
   document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));
 }
 
