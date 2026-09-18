@@ -264,7 +264,7 @@ async function decorate() {
   await decorateCards();
   await decorateDetail();
   addAttribution();
-  if (location.hash.replace(/^#/,'') === 'calendar') await enhanceCalendar();
+  /* Calendar is rendered natively by app.js so release categories, search and pagination remain intact. */
 }
 
 async function loadMetadata() {
