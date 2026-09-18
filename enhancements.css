@@ -135,3 +135,17 @@
 .game-preview-gameplay{margin:8px 0}.game-preview-gameplay>small,.game-detail-gameplay>small{display:block;margin-bottom:5px;font-size:8px;color:var(--muted)}
 .game-detail-gameplay{margin-top:10px}
 @media(max-width:720px){.gameplay-filter-box{min-width:100%;width:100%}.gameplay-toolbar{display:grid;grid-template-columns:1fr 1fr}.gameplay-toolbar .gameplay-filter-box{grid-column:1/-1}.gameplay-toolbar input{grid-column:1/-1}.gameplay-chip{font-size:7px}}
+
+.gameplay-filter-section{margin:0 0 10px}
+.gameplay-multi-filter{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),#0d1623);border-radius:12px;padding:10px}
+.gameplay-multi-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.gameplay-multi-head>span:first-child{display:grid;gap:2px}.gameplay-multi-head b{font-size:10px}.gameplay-multi-head small{font-size:8px;color:var(--muted)}
+.gameplay-selected-count{border:1px solid rgba(155,118,255,.25);background:rgba(155,118,255,.07);color:#d4c5ff;border-radius:999px;padding:4px 8px;font-size:8px;white-space:nowrap}
+.gameplay-choice-list{display:flex;gap:6px;flex-wrap:wrap;max-height:132px;overflow:auto;padding:1px}
+.gameplay-choice{appearance:none;border:1px solid rgba(143,162,186,.18);background:rgba(9,15,24,.5);color:#aab9c8;border-radius:9px;padding:6px 8px;display:grid;gap:1px;text-align:left;cursor:pointer;font-size:9px}
+.gameplay-choice small{font-size:7px;color:var(--muted)}.gameplay-choice:hover{border-color:#6e5aa9}.gameplay-choice.active{border-color:#9b76ff;background:rgba(155,118,255,.14);color:#eee8ff;box-shadow:0 0 0 1px rgba(155,118,255,.1) inset}.gameplay-choice.active small{color:#cbbdff}
+.gameplay-multi-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(143,162,186,.1)}
+.gameplay-multi-foot>span{min-width:0;color:var(--muted);font-size:8px}.gameplay-multi-foot b{color:#dffcff}
+.game-filter-summary.released-summary{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:900px){.game-filter-summary.released-summary{grid-template-columns:1fr 1fr}.gameplay-choice-list{max-height:160px}}
+@media(max-width:720px){.gameplay-multi-head{align-items:flex-start}.gameplay-choice-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));max-height:210px}.gameplay-multi-foot{display:grid}.gameplay-multi-foot .btn{width:100%}.game-filter-summary.released-summary{grid-template-columns:1fr 1fr}}
