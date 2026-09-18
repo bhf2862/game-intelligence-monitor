@@ -117,3 +117,11 @@
 .selected-update-time{font-size:10px!important;line-height:1.3}
 @media(max-width:1200px){.selected-game-issue-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.selected-game-identity{grid-column:1/-1}.selected-issue-top{grid-column:span 1}}
 @media(max-width:720px){.selected-game-issue-summary{grid-template-columns:1fr 1fr}.selected-game-identity{grid-column:1/-1}.selected-game-cover{width:76px;height:48px}.selected-issue-metric strong{font-size:14px}.selected-issue-top{grid-column:1/-1}.selected-update-time{font-size:9px!important}}
+
+.issue-trend-panel{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),#0c1521);border-radius:13px;padding:12px;margin:0 0 12px;overflow:hidden}
+.issue-trend-head{align-items:center}.issue-peak-card{border:1px solid rgba(255,189,89,.25);background:rgba(255,189,89,.06);border-radius:10px;padding:8px 10px;display:grid;gap:2px;min-width:170px}.issue-peak-card small{font-size:7px;color:var(--muted)}.issue-peak-card strong{font-size:11px;color:#ffe0a8}.issue-peak-card span{font-size:8px;color:var(--muted)}
+.issue-trend-note{margin:0 0 8px;border:1px solid rgba(255,189,89,.18);background:rgba(255,189,89,.045);border-radius:8px;padding:6px 8px;color:#d7bd91;font-size:8px}
+.issue-trend-meta{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px}.issue-trend-meta span{border:1px solid rgba(143,162,186,.14);border-radius:999px;padding:4px 7px;font-size:8px;color:var(--muted)}.issue-trend-meta b{color:#dffcff}
+.issue-chart-wrap{width:100%;overflow-x:auto}.issue-trend-chart{width:100%;min-width:620px;height:auto;display:block}
+.issue-chart-grid{stroke:rgba(143,162,186,.12);stroke-width:1}.issue-chart-axis{fill:#71859a;font-size:9px}.issue-chart-area{fill:rgba(40,215,233,.07)}.issue-chart-line{fill:none;stroke:#28d7e9;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.issue-chart-peak-line{stroke:rgba(255,189,89,.38);stroke-width:1;stroke-dasharray:4 4}.issue-chart-peak{fill:#ffbd59;stroke:#0c1521;stroke-width:3}.issue-chart-peak-label{fill:#ffe0a8;font-size:10px;font-weight:800}
+@media(max-width:720px){.issue-trend-panel{padding:9px}.issue-trend-head{display:grid;gap:8px}.issue-peak-card{min-width:0;width:100%}.issue-trend-chart{min-width:560px}.issue-trend-meta{display:grid;grid-template-columns:1fr}.issue-trend-meta span{border-radius:7px}}
