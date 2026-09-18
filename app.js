@@ -545,6 +545,120 @@ async function pageCalendar(){
   document.querySelector('#release-prev').onclick=()=>{state.releasePage=Math.max(0,state.releasePage-1);pageCalendar()};
   document.querySelector('#release-next').onclick=()=>{state.releasePage++;pageCalendar()};
 }
+
+async function showPricePreview(productId){
+  if(!productId)return;
+  closeGamePreview();
+  const shell=document.createElement('div');
+  shell.className='game-preview-backdrop';
+  shell.innerHTML='<div class="game-preview-modal price-preview-modal"><div class="game-preview-loading">讀取價格預覽 / Loading price preview…</div></div>';
+  document.body.appendChild(shell);
+  shell.addEventListener('click',e=>{if(e.target===shell)closeGamePreview();});
+  try{
+    const {data:p,error}=await supabase.from('store_products')
+      .select('*,games!inner(id,slug,name_en,name_zh_hant,cover_url,release_date,release_status,gameplay_tags)')
+      .eq('id',Number(productId))
+      .single();
+    if(error)throw error;
+
+    const {data:history,error:histError}=await supabase.from('price_history')
+      .select('price,list_price,discount_percent,currency,captured_at')
+      .eq('product_id',Number(productId))
+      .order('captured_at',{ascending:true});
+    if(histError)throw histError;
+
+    const g=p.games||{};
+    const hist=history||[];
+    const prices=hist.map(x=>Number(x.price)).filter(Number.isFinite);
+    const discounts=hist.map(x=>Number(x.discount_percent||0)).filter(x=>Number.isFinite(x)&&x>0);
+    const historicalLow=prices.length?Math.min(...prices):null;
+    const historicalBestDiscount=discounts.length?Math.max(...discounts):null;
+    const current=Number(p.current_price);
+    const list=p.list_price==null?null:Number(p.list_price);
+    const discount=Number(p.discount_percent||0);
+
+    let comparison='歷史資料累積中 / History accumulating';
+    let compareClass='';
+    if(historicalLow!=null&&Number.isFinite(current)){
+      if(current<historicalLow){comparison='🔥 新歷史低價 / New historical low';compareClass='ok';}
+      else if(current===historicalLow){comparison='＝ 歷史最低價 / Matches historical low';compareClass='ok';}
+      else comparison=`目前比歷史最低高 ${money(current-historicalLow,p.currency)}`;
+    }
+
+    const offerEnd=(()=>{
+      if(discount<=0)return {main:'目前無優惠',sub:'No active offer'};
+      if(!p.sale_end)return {main:'期限未提供',sub:'Official end date unavailable'};
+      const end=new Date(p.sale_end);
+      const ms=end-Date.now();
+      if(ms<=0)return {main:'優惠已結束',sub:fmtDate(p.sale_end,true)};
+      const hours=Math.max(0,Math.floor(ms/3600000));
+      const days=Math.floor(hours/24);
+      return {main:days>0?`剩 ${days} 天 ${hours%24} 小時`:`剩 ${hours} 小時`,sub:`至 ${fmtDate(p.sale_end,true)}`};
+    })();
+
+    const title=g.name_zh_hant||g.name_en||'Game';
+    shell.innerHTML=`<div class="game-preview-modal price-preview-modal" role="dialog" aria-modal="true" aria-label="${esc(title)} 價格預覽">
+      <button class="game-preview-close" type="button" aria-label="關閉預覽">×</button>
+      <div class="price-preview-hero">
+        <div class="price-preview-cover native-cover">${gameCoverInner(g)}</div>
+        <div class="price-preview-title">
+          <span class="badge ${statusClass(g.release_status)}">${esc(statusZh(g.release_status))}</span>
+          <h2>${esc(title)}</h2>
+          <p>${esc(g.name_en||'')}</p>
+          <div class="price-labels">
+            <span class="store-badge">${esc(p.platform||'Platform')}</span>
+            <span class="store-badge">${esc(p.store||'Store')}</span>
+            <span class="store-badge">${esc(p.edition||'Edition')}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="price-preview-grid">
+        <div><small>原價 / List</small><strong>${money(list,p.currency)}</strong></div>
+        <div><small>現價 / Current</small><strong>${money(p.current_price,p.currency)}</strong>${discount>0?`<span class="badge ok">-${discount}%</span>`:''}</div>
+        <div><small>優惠期限 / Offer ends</small><strong>${esc(offerEnd.main)}</strong><span>${esc(offerEnd.sub)}</span></div>
+        <div><small>歷史最低 / Historical low</small><strong>${historicalLow==null?'—':money(historicalLow,p.currency)}</strong></div>
+        <div><small>歷史最大折扣 / Best discount</small><strong>${historicalBestDiscount==null?'—':`-${historicalBestDiscount}%`}</strong></div>
+        <div><small>價格快照 / Snapshots</small><strong>${hist.length.toLocaleString()}</strong></div>
+      </div>
+
+      <div class="price-preview-comparison">
+        <small>與之前優惠相比 / vs Previous deals</small>
+        <strong class="${compareClass}">${esc(comparison)}</strong>
+      </div>
+
+      ${Array.isArray(g.gameplay_tags)&&g.gameplay_tags.length?`<div class="game-preview-gameplay"><small>玩法分類 / Gameplay</small><div class="gameplay-row">${renderGameplayTags(g,8)}</div></div>`:''}
+
+      <div class="game-preview-actions">
+        <button class="btn" id="price-preview-close">關閉 / Close</button>
+        <button class="btn" id="price-preview-game">遊戲情報 / Game details</button>
+        ${p.store_url?`<button class="btn primary" id="price-preview-store">前往商店 / Store ↗</button>`:''}
+      </div>
+    </div>`;
+
+    shell.querySelector('.game-preview-close').onclick=closeGamePreview;
+    shell.querySelector('#price-preview-close').onclick=closeGamePreview;
+    shell.querySelector('#price-preview-game').onclick=()=>{closeGamePreview();location.hash=`game/${g.slug}`;};
+    shell.querySelector('#price-preview-store')?.addEventListener('click',()=>window.open(p.store_url,'_blank','noopener,noreferrer'));
+    bindCoverImages(shell);
+    bindCards();
+  }catch(err){
+    shell.innerHTML=`<div class="game-preview-modal price-preview-modal"><button class="game-preview-close" type="button">×</button><div class="empty">價格預覽讀取失敗：${esc(err?.message||err)}</div></div>`;
+    shell.querySelector('.game-preview-close').onclick=closeGamePreview;
+  }
+}
+function bindPricePreviews(){
+  const page=pageEl();
+  if(!page||page.dataset.pricePreviewDelegated==='1')return;
+  page.dataset.pricePreviewDelegated='1';
+  page.addEventListener('click',e=>{
+    const target=e.target.closest('[data-price-preview]');
+    if(!target)return;
+    e.preventDefault();
+    e.stopPropagation();
+    showPricePreview(target.dataset.pricePreview);
+  });
+}
 async function pagePrices(){
   const {data,error}=await supabase.from('store_products')
     .select('*,games!inner(id,slug,name_en,name_zh_hant,cover_url)')
@@ -651,7 +765,7 @@ async function pagePrices(){
         const cover=game.cover_url?esc(game.cover_url):'';
         const editionZh=({'Standard':'標準版','Deluxe':'豪華版','Ultimate':'終極版','Collector':'典藏版','DLC':'下載內容','Bundle':'組合包'})[x.edition]||x.edition||'版本';
         return `<article class="price-card price-card-rich">
-          <button class="price-cover native-cover open-game" data-slug="${esc(game.slug)}" aria-label="預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</button>
+          <button class="price-cover native-cover price-preview-trigger" data-price-preview="${esc(x.id)}" aria-label="價格預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</button>
           <div class="price-game">
             <strong>${esc(game.name_zh_hant||game.name_en)}</strong>
             <span>${esc(game.name_en||'')}</span>
@@ -686,13 +800,14 @@ async function pagePrices(){
             </div>
           </div>
           <div class="price-open">
-            <button class="btn primary open-game" data-slug="${esc(game.slug)}">預覽 / Preview</button>
+            <button class="btn primary price-preview-trigger" data-price-preview="${esc(x.id)}">價格預覽 / Price Preview</button>
             ${x.store_url?`<button class="btn" data-url="${esc(x.store_url)}">前往商店 ↗</button>`:''}
           </div>
         </article>`;
       }).join('')||'<div class="empty">尚無價格資料</div>'}
     </div>`;
   bindCards();
+  bindPricePreviews();
   document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));
 }
 
