@@ -175,3 +175,9 @@
 
 .price-preview-link{text-decoration:none;color:inherit}
 a.btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+
+.boot-diagnostic{display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;text-align:center}
+.boot-diagnostic strong{font-size:18px;color:#dffcff}
+.boot-diagnostic span{font-size:11px;color:var(--muted);max-width:620px;line-height:1.5}
+.boot-diagnostic.error strong{color:#ffb3b3}
+.boot-diagnostic .btn{margin-top:6px}
