@@ -46,7 +46,7 @@ function zhDate(value) {
 }
 
 function addImage(container, url, alt) {
-  if (!container || !url || container.dataset.imageApplied === '1') return;
+  if (!container || !url || container.dataset.imageApplied === '1' || container.classList.contains('native-cover')) return;
   const src = safeUrl(url);
   if (!src) return;
   const img = document.createElement('img');
@@ -142,18 +142,9 @@ function renderReleaseDate(card, game) {
 }
 
 async function decorateCards() {
-  const cards = [...document.querySelectorAll('.game-card[data-game]')];
-  if (!cards.length) return;
-  await ensureGameMetadata(cards.map(card => card.dataset.game));
-  const games = cards.map(card => gamesBySlug.get(card.dataset.game)).filter(Boolean);
-  await ensureLinks(games.map(g=>g.id));
-  for (const card of cards) {
-    const game = gamesBySlug.get(card.dataset.game);
-    if (!game) continue;
-    addImage(card.querySelector('.cover'), game.cover_url, game.name_zh_hant || game.name_en);
-    renderReleaseDate(card, game);
-    renderSourceLinks(card, game);
-  }
+  // Native cover rendering and Steam CDN fallbacks are handled by app.js.
+  // Do not clear or replace .cover contents here.
+  return;
 }
 
 async function decorateDetail() {
