@@ -254,12 +254,22 @@ async function init(){
 
     bootMessage('Loading Game Intelligence Monitor…','正在確認登入狀態 / Checking session…');
     const sessionResult=await withTimeout(supabase.auth.getSession(),8000,'Auth session');
-    const session=sessionResult?.data?.session||null;
+    let session=sessionResult?.data?.session||null;
     state.session=session;
 
     if(session){
+      bootMessage('Loading Game Intelligence Monitor…','正在驗證登入憑證 / Validating session…');
+      const userCheck=await withTimeout(supabase.auth.getUser(),8000,'User validation').catch(()=>({data:{user:null},error:true}));
+      if(!userCheck?.data?.user){
+        const refreshed=await withTimeout(supabase.auth.refreshSession(),8000,'Session refresh');
+        if(refreshed?.data?.session){
+          session=refreshed.data.session;
+          state.session=session;
+        }
+      }
+
       bootMessage('Loading Game Intelligence Monitor…','正在驗證私人存取權限 / Checking access…');
-      state.allowed=await withTimeout(checkAllowed(),8000,'Access check');
+      state.allowed=await withTimeout(checkAllowed(),12000,'Access check');
     }
 
     supabase.auth.onAuthStateChange((_event,nextSession)=>{
@@ -282,12 +292,28 @@ async function init(){
   }
 }
 async function checkAllowed(){
-  const {data,error}=await supabase.rpc('is_allowed_user');
-  if(error){
-    console.error('[Game Intel] allowlist check failed',error);
-    return false;
+  const runCheck=async()=>{
+    const {data,error}=await supabase.rpc('is_allowed_user');
+    if(error)console.warn('[Game Intel] allowlist RPC failed',error);
+    return {allowed:data===true,error};
+  };
+
+  let result=await runCheck();
+  if(result.allowed)return true;
+
+  try{
+    bootMessage('Loading Game Intelligence Monitor…','登入憑證需要更新，正在重新整理 / Refreshing session…');
+    const refreshed=await withTimeout(supabase.auth.refreshSession(),8000,'Session refresh');
+    if(refreshed?.error)throw refreshed.error;
+    if(refreshed?.data?.session)state.session=refreshed.data.session;
+
+    result=await runCheck();
+    if(result.allowed)return true;
+  }catch(err){
+    console.warn('[Game Intel] session refresh failed',err);
   }
-  return data===true;
+
+  return false;
 }
 
 function render(){
