@@ -7,7 +7,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 const app = document.querySelector('#app');
-const state = { session:null, allowed:false, lang:localStorage.getItem('game-intel-lang') || 'zh', search:'', page:0, pageSize:36, gameFilter:localStorage.getItem('game-intel-game-filter') || 'all' };
+const state = { session:null, allowed:false, lang:localStorage.getItem('game-intel-lang') || 'zh', search:'', page:0, pageSize:36, gameFilter:'released', releaseFilter:localStorage.getItem('game-intel-release-filter') || 'unreleased', releasePage:0 };
 const fmtDate = (v, withTime=false) => v ? new Intl.DateTimeFormat('zh-TW', withTime ? {dateStyle:'medium',timeStyle:'short'} : {year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(v)) : 'TBA';
 const money = (v, c='TWD') => v == null ? '—' : Number(v) === 0 ? '免費' : c === 'TWD' ? `NT$${Number(v).toLocaleString()}` : `${c} ${Number(v).toLocaleString()}`;
 const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -61,6 +61,49 @@ function renderGameFilterTabs(counts){
   return `<div class="game-filter-tabs" role="tablist" aria-label="遊戲分類 / Game categories">${gameFilters.map(f=>`<button class="game-filter-tab ${state.gameFilter===f.id?'active':''}" data-game-filter="${f.id}" role="tab" aria-selected="${state.gameFilter===f.id?'true':'false'}"><span class="game-filter-icon">${f.icon}</span><span class="game-filter-name">${f.zh}<small>${f.en}</small></span><b>${Number(counts?.[f.id]||0).toLocaleString()}</b></button>`).join('')}</div>`;
 }
 
+
+const releaseFilters=[
+  {id:'unreleased',icon:'◷',zh:'全部未上市',en:'All Unreleased'},
+  {id:'upcoming',icon:'📅',zh:'即將上市',en:'Upcoming'},
+  {id:'preorder',icon:'🛒',zh:'預購中',en:'Pre-order'},
+  {id:'announced',icon:'📣',zh:'已公布',en:'Announced'},
+  {id:'early_access',icon:'⚡',zh:'搶先體驗',en:'Early Access'},
+  {id:'delayed',icon:'⏳',zh:'延期',en:'Delayed'},
+  {id:'tba',icon:'?',zh:'日期待定',en:'TBA'}
+];
+const releaseFilterInfo=id=>releaseFilters.find(x=>x.id===id)||releaseFilters[0];
+function applyReleaseFilter(q,id){
+  const now=new Date().toISOString();
+  if(id==='upcoming') return q.gte('release_date',now).neq('release_status','released').neq('release_status','cancelled');
+  if(id==='preorder') return q.eq('release_status','preorder');
+  if(id==='announced') return q.eq('release_status','announced');
+  if(id==='early_access') return q.eq('release_status','early_access');
+  if(id==='delayed') return q.eq('release_status','delayed');
+  if(id==='tba') return q.is('release_date',null).neq('release_status','released').neq('release_status','cancelled');
+  return q.neq('release_status','released').neq('release_status','cancelled');
+}
+function applyReleaseSort(q,id){
+  if(id==='upcoming') return q.order('release_date',{ascending:true,nullsFirst:false});
+  return q.order('updated_at',{ascending:false,nullsFirst:false});
+}
+async function loadReleaseCounts(){
+  const now=new Date().toISOString();
+  const queries={
+    unreleased:supabase.from('games').select('id',{count:'exact',head:true}).neq('release_status','released').neq('release_status','cancelled'),
+    upcoming:supabase.from('games').select('id',{count:'exact',head:true}).gte('release_date',now).neq('release_status','released').neq('release_status','cancelled'),
+    preorder:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','preorder'),
+    announced:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','announced'),
+    early_access:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','early_access'),
+    delayed:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','delayed'),
+    tba:supabase.from('games').select('id',{count:'exact',head:true}).is('release_date',null).neq('release_status','released').neq('release_status','cancelled')
+  };
+  const entries=await Promise.all(Object.entries(queries).map(async([id,p])=>{const r=await p;return[id,r.count||0]}));
+  return Object.fromEntries(entries);
+}
+function renderReleaseFilterTabs(counts){
+  return `<div class="game-filter-tabs release-filter-tabs" role="tablist" aria-label="上市情報分類 / Release categories">${releaseFilters.map(f=>`<button class="game-filter-tab ${state.releaseFilter===f.id?'active':''}" data-release-filter="${f.id}" role="tab" aria-selected="${state.releaseFilter===f.id?'true':'false'}"><span class="game-filter-icon">${f.icon}</span><span class="game-filter-name">${f.zh}<small>${f.en}</small></span><b>${Number(counts?.[f.id]||0).toLocaleString()}</b></button>`).join('')}</div>`;
+}
+
 function toast(msg, error=false){
   document.querySelector('.toast')?.remove();
   const el=document.createElement('div');el.className=`toast${error?' error':''}`;el.textContent=msg;document.body.appendChild(el);setTimeout(()=>el.remove(),3500);
@@ -94,7 +137,7 @@ function renderDenied(){
   document.querySelector('#logout').onclick=()=>supabase.auth.signOut();
 }
 
-const navItems=[['dashboard','◈','總覽','Dashboard'],['games','🎮','全部遊戲','Games'],['calendar','◷','上市日曆','Calendar'],['prices','＄','價格','Prices'],['issues','⚠','玩家問題','Issues'],['live','◉','直播','Live'],['changes','↯','重大變化','Changes'],['watchlist','★','收藏','Watchlist'],['settings','⚙','設定','Settings']];
+const navItems=[['dashboard','◈','總覽','Dashboard'],['games','🎮','已上市遊戲','Released Games'],['calendar','◷','上市情報','Upcoming'],['prices','＄','價格','Prices'],['issues','⚠','玩家問題','Issues'],['live','◉','直播','Live'],['changes','↯','重大變化','Changes'],['watchlist','★','收藏','Watchlist'],['settings','⚙','設定','Settings']];
 function route(){const h=location.hash.replace(/^#/,'')||'dashboard';const [name,arg]=h.split('/');return{name,arg};}
 function renderShell(){
   const r=route();
@@ -133,7 +176,7 @@ async function pageDashboard(){
   const [countsRes,upcomingRes,recentRes,priceRes,issueRes,changeRes,healthRes]=await Promise.all([
     loadGameFilterCounts(),
     supabase.from('games').select('*').gte('release_date',nowIso).neq('release_status','released').neq('release_status','cancelled').order('release_date',{ascending:true}).limit(6),
-    supabase.from('games').select('*').order('updated_at',{ascending:false}).limit(6),
+    supabase.from('games').select('*').eq('release_status','released').order('updated_at',{ascending:false}).limit(6),
     supabase.from('store_products').select('*,games!inner(slug,name_en,name_zh_hant,cover_url)').eq('region','TW').gt('discount_percent',0).order('discount_percent',{ascending:false}).limit(6),
     supabase.from('game_issues').select('*,games!inner(slug,name_en,name_zh_hant)').eq('resolved',false).order('mention_count_24h',{ascending:false}).limit(6),
     supabase.from('change_events').select('*,games(name_zh_hant,name_en,slug)').gte('detected_at',since).order('detected_at',{ascending:false}).limit(8),
@@ -143,7 +186,7 @@ async function pageDashboard(){
   if(recentRes.error)throw recentRes.error;
   const counts=countsRes||{};
   const upcoming=await hydrateGames(upcomingRes.data||[]);
-  const recent=await hydrateGames(recentRes.data||[]);
+  const recent=await hydrateGames((recentRes.data||[]).filter(g=>g.release_status==='released'));
   const prices=priceRes.data||[];
   const issues=issueRes.data||[];
   const changes=changeRes.data||[];
@@ -152,9 +195,9 @@ async function pageDashboard(){
   const youtube=health.find(x=>x.source_name==='youtube');
 
   const quick=[
-    ['all','🎮','全部遊戲','All games',counts.all||0],
+    ['released','✓','已上市遊戲','Released Games',counts.released||0],
+    ['unreleased','◷','全部未上市','All Unreleased',(counts.all||0)-(counts.released||0)-(counts.cancelled||0)],
     ['upcoming','📅','即將上市','Upcoming',counts.upcoming||0],
-    ['released','✓','已上市','Released',counts.released||0],
     ['preorder','🛒','預購中','Pre-order',counts.preorder||0],
     ['announced','📣','已公布','Announced',counts.announced||0],
     ['tba','?','日期待定','TBA',counts.tba||0]
@@ -174,7 +217,7 @@ async function pageDashboard(){
     </section>
 
     <section class="dashboard-shortcuts">
-      <button data-route-jump="calendar"><span>◷</span><b>上市名單</b><small>Release Calendar</small></button>
+      <button data-route-jump="calendar"><span>◷</span><b>上市情報</b><small>Upcoming & Announced</small></button>
       <button data-route-jump="prices"><span>＄</span><b>價格追蹤</b><small>Price Tracker</small></button>
       <button data-route-jump="issues"><span>⚠</span><b>玩家問題</b><small>Issues</small></button>
       <button data-route-jump="live"><span>◉</span><b>直播熱度</b><small>Live Trends</small></button>
@@ -224,7 +267,7 @@ async function pageDashboard(){
     </section>
 
     <section class="section dashboard-section">
-      <div class="section-head"><div><h2>最近更新遊戲 / Recently Updated</h2><p>卡片外直接查看上市日期、價格、評價與直播</p></div><button class="btn ghost" data-dashboard-filter="all">全部遊戲 →</button></div>
+      <div class="section-head"><div><h2>最近更新的已上市遊戲 / Released Games</h2><p>卡片外直接查看上市日期、價格、評價與直播</p></div><button class="btn ghost" data-dashboard-filter="released">已上市遊戲 →</button></div>
       <div class="grid">${recent.map(gameCard).join('')||'<div class="empty">尚無遊戲資料</div>'}</div>
     </section>
 
@@ -237,34 +280,55 @@ async function pageDashboard(){
 
   bindCards();
   document.querySelectorAll('[data-dashboard-filter]').forEach(b=>b.onclick=()=>{
-    state.gameFilter=b.dataset.dashboardFilter;
-    localStorage.setItem('game-intel-game-filter',state.gameFilter);
-    state.page=0;
-    location.hash='games';
+    const id=b.dataset.dashboardFilter;
+    if(id==='released'){
+      state.page=0;
+      location.hash='games';
+      return;
+    }
+    state.releaseFilter=id==='unreleased'?'unreleased':id;
+    localStorage.setItem('game-intel-release-filter',state.releaseFilter);
+    state.releasePage=0;
+    location.hash='calendar';
   });
   document.querySelectorAll('[data-route-jump]').forEach(b=>b.onclick=()=>{location.hash=b.dataset.routeJump});
 }
 async function pageGames(){
-  const counts=await loadGameFilterCounts();
-  let q=supabase.from('games').select('*',{count:'exact'});
-  q=applyGameFilter(q,state.gameFilter);
+  let q=supabase.from('games').select('*',{count:'exact'}).eq('release_status','released');
   if(state.search.trim()){const safe=state.search.replace(/[%,()]/g,'');q=q.or(`name_en.ilike.%${safe}%,name_zh_hant.ilike.%${safe}%,original_name.ilike.%${safe}%`)}
-  q=applyGameSort(q,state.gameFilter).range(state.page*state.pageSize,state.page*state.pageSize+state.pageSize-1);
+  q=q.order('release_date',{ascending:false,nullsFirst:false}).range(state.page*state.pageSize,state.page*state.pageSize+state.pageSize-1);
   const {data,count,error}=await q;if(error)throw error;
   const games=await hydrateGames(data||[]);
   const pages=Math.max(1,Math.ceil((count||0)/state.pageSize));
-  const active=gameFilterInfo(state.gameFilter);
-  pageEl().innerHTML=`${header('遊戲分類 / Game Library','依上市狀態分類瀏覽，不必在十幾萬款遊戲中混著找。')}${renderGameFilterTabs(counts)}<div class="game-filter-summary"><div><span>目前分類 / Category</span><strong>${active.icon} ${active.zh} / ${active.en}</strong></div><div><span>符合條件 / Results</span><strong>${(count||0).toLocaleString()} 款</strong></div><div><span>目前頁數 / Page</span><strong>${state.page+1} / ${pages}</strong></div></div><div class="toolbar"><input class="control" id="game-search" value="${esc(state.search)}" placeholder="在「${active.zh}」中搜尋遊戲…"><button class="btn" id="search-btn">搜尋 / Search</button>${state.search?'<button class="btn ghost" id="clear-search">清除 / Clear</button>':''}</div><div class="grid">${games.map(gameCard).join('')||'<div class="empty">這個分類目前沒有符合條件的遊戲。</div>'}</div><div class="pagination"><button class="btn" id="prev" ${state.page===0?'disabled':''}>← 上一頁</button><span class="page-indicator">第 ${state.page+1} / ${pages} 頁</span><button class="btn" id="next" ${state.page+1>=pages?'disabled':''}>下一頁 →</button></div>`;
+  pageEl().innerHTML=`${header('已上市遊戲 / Released Games','只顯示已經正式上市的遊戲；未上市、預購與已公布遊戲統一移到「上市情報」。')}<div class="game-filter-summary released-summary"><div><span>分類 / Category</span><strong>✓ 已上市 / Released</strong></div><div><span>遊戲數量 / Games</span><strong>${(count||0).toLocaleString()} 款</strong></div><div><span>目前頁數 / Page</span><strong>${state.page+1} / ${pages}</strong></div></div><div class="toolbar"><input class="control" id="game-search" value="${esc(state.search)}" placeholder="搜尋已上市遊戲…"><button class="btn" id="search-btn">搜尋 / Search</button>${state.search?'<button class="btn ghost" id="clear-search">清除 / Clear</button>':''}<button class="btn ghost" id="open-release-center">查看未上市 / Upcoming →</button></div><div class="grid">${games.map(gameCard).join('')||'<div class="empty">沒有符合條件的已上市遊戲。</div>'}</div><div class="pagination"><button class="btn" id="prev" ${state.page===0?'disabled':''}>← 上一頁</button><span class="page-indicator">第 ${state.page+1} / ${pages} 頁</span><button class="btn" id="next" ${state.page+1>=pages?'disabled':''}>下一頁 →</button></div>`;
   bindCards();
-  document.querySelectorAll('[data-game-filter]').forEach(b=>b.onclick=()=>{state.gameFilter=b.dataset.gameFilter;localStorage.setItem('game-intel-game-filter',state.gameFilter);state.page=0;pageGames();});
   document.querySelector('#search-btn').onclick=()=>{state.search=document.querySelector('#game-search').value.trim();state.page=0;pageGames()};
   document.querySelector('#game-search').onkeydown=e=>{if(e.key==='Enter')document.querySelector('#search-btn').click()};
   document.querySelector('#clear-search')?.addEventListener('click',()=>{state.search='';state.page=0;pageGames()});
+  document.querySelector('#open-release-center').onclick=()=>{state.releaseFilter='unreleased';state.releasePage=0;location.hash='calendar'};
   document.querySelector('#prev').onclick=()=>{state.page=Math.max(0,state.page-1);pageGames()};
   document.querySelector('#next').onclick=()=>{state.page++;pageGames()};
 }
-async function pageCalendar(){const start=new Date(Date.now()-14*864e5).toISOString();const end=new Date(Date.now()+365*864e5).toISOString();const {data,error}=await supabase.from('games').select('id,slug,name_en,name_zh_hant,release_status,release_date').gte('release_date',start).lte('release_date',end).order('release_date').limit(500);if(error)throw error;const groups=new Map();for(const g of data||[]){const key=(g.release_date||'TBA').slice(0,10);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(g)}pageEl().innerHTML=`${header('上市日曆 / Calendar','未來一年上市與近期發售遊戲。')}<div class="panel">${[...groups].map(([d,rows])=>`<div class="timeline-row" style="grid-template-columns:110px 1fr"><div><b>${d==='TBA'?'TBA':fmtDate(d)}</b><div class="sub">${rows.length} 款</div></div><div>${rows.map(g=>`<button class="btn ghost open-game" data-slug="${esc(g.slug)}" style="margin:3px">${esc(g.name_zh_hant||g.name_en)} · ${statusZh(g.release_status)}</button>`).join('')}</div></div>`).join('')||'<div class="empty">目前沒有日期資料</div>'}</div>`;bindCards();}
-
+async function pageCalendar(){
+  const counts=await loadReleaseCounts();
+  let q=supabase.from('games').select('*',{count:'exact'});
+  q=applyReleaseFilter(q,state.releaseFilter);
+  if(state.search.trim()){const safe=state.search.replace(/[%,()]/g,'');q=q.or(`name_en.ilike.%${safe}%,name_zh_hant.ilike.%${safe}%,original_name.ilike.%${safe}%`)}
+  q=applyReleaseSort(q,state.releaseFilter).range(state.releasePage*state.pageSize,state.releasePage*state.pageSize+state.pageSize-1);
+  const {data,count,error}=await q;if(error)throw error;
+  const games=await hydrateGames(data||[]);
+  const pages=Math.max(1,Math.ceil((count||0)/state.pageSize));
+  const active=releaseFilterInfo(state.releaseFilter);
+  pageEl().innerHTML=`${header('上市情報 / Upcoming & Announced','所有尚未正式上市的遊戲集中在這裡：即將上市、預購、已公布、搶先體驗、延期與日期待定。')}${renderReleaseFilterTabs(counts)}<div class="game-filter-summary"><div><span>目前分類 / Category</span><strong>${active.icon} ${active.zh} / ${active.en}</strong></div><div><span>符合條件 / Results</span><strong>${(count||0).toLocaleString()} 款</strong></div><div><span>目前頁數 / Page</span><strong>${state.releasePage+1} / ${pages}</strong></div></div><div class="toolbar"><input class="control" id="release-search" value="${esc(state.search)}" placeholder="在「${active.zh}」中搜尋…"><button class="btn" id="release-search-btn">搜尋 / Search</button>${state.search?'<button class="btn ghost" id="release-clear-search">清除 / Clear</button>':''}<button class="btn ghost" id="open-released-games">已上市遊戲 →</button></div><div class="grid">${games.map(gameCard).join('')||'<div class="empty">這個分類目前沒有符合條件的遊戲。</div>'}</div><div class="pagination"><button class="btn" id="release-prev" ${state.releasePage===0?'disabled':''}>← 上一頁</button><span class="page-indicator">第 ${state.releasePage+1} / ${pages} 頁</span><button class="btn" id="release-next" ${state.releasePage+1>=pages?'disabled':''}>下一頁 →</button></div>`;
+  bindCards();
+  document.querySelectorAll('[data-release-filter]').forEach(b=>b.onclick=()=>{state.releaseFilter=b.dataset.releaseFilter;localStorage.setItem('game-intel-release-filter',state.releaseFilter);state.releasePage=0;pageCalendar();});
+  document.querySelector('#release-search-btn').onclick=()=>{state.search=document.querySelector('#release-search').value.trim();state.releasePage=0;pageCalendar()};
+  document.querySelector('#release-search').onkeydown=e=>{if(e.key==='Enter')document.querySelector('#release-search-btn').click()};
+  document.querySelector('#release-clear-search')?.addEventListener('click',()=>{state.search='';state.releasePage=0;pageCalendar()});
+  document.querySelector('#open-released-games').onclick=()=>{state.page=0;location.hash='games'};
+  document.querySelector('#release-prev').onclick=()=>{state.releasePage=Math.max(0,state.releasePage-1);pageCalendar()};
+  document.querySelector('#release-next').onclick=()=>{state.releasePage++;pageCalendar()};
+}
 async function pagePrices(){const {data,error}=await supabase.from('store_products').select('*,games!inner(slug,name_en,name_zh_hant)').eq('region','TW').order('discount_percent',{ascending:false}).limit(500);if(error)throw error;const ids=(data||[]).map(x=>x.id);const {data:hist}=ids.length?await supabase.from('price_history').select('product_id,price').in('product_id',ids):{data:[]};const low=new Map();for(const h of hist||[]){const k=String(h.product_id),v=Number(h.price);if(!low.has(k)||v<low.get(k))low.set(k,v)}pageEl().innerHTML=`${header('價格追蹤 / Price Tracker','Standard / Deluxe / DLC 分開比較，TW / NTD 優先。')}<div class="table-wrap"><div class="table"><div class="table-head"><span>遊戲 / 版本</span><span>平台 / 商店</span><span>原價</span><span>現價</span><span>歷史低價</span><span>連結</span></div>${(data||[]).map(x=>`<div class="table-row"><div><strong>${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong><span class="sub">${esc(x.edition)}</span></div><span>${esc(x.platform)} / ${esc(x.store)}</span><span>${money(x.list_price,x.currency)}</span><b>${money(x.current_price,x.currency)} ${Number(x.discount_percent)>0?`<span class="badge ok">-${Number(x.discount_percent)}%</span>`:''}</b><span>${low.has(String(x.id))?money(low.get(String(x.id)),x.currency):'—'}</span><button class="btn" data-url="${esc(x.store_url)}">↗</button></div>`).join('')||'<div class="empty">尚無價格資料</div>'}</div></div>`;document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));}
 
 async function pageIssues(){const {data,error}=await supabase.from('game_issues').select('*,games!inner(slug,name_en,name_zh_hant)').eq('resolved',false).order('mention_count_24h',{ascending:false}).limit(300);if(error)throw error;pageEl().innerHTML=`${header('玩家問題 / Issues','問題分類、提及量、成長率與官方確認狀態。')}<div class="panel">${(data||[]).map(x=>`<div class="issue-row" style="grid-template-columns:minmax(220px,1.3fr) 1fr 90px 90px"><div><b>${esc(x.games?.name_zh_hant||x.games?.name_en)}</b><div class="sub">${esc(x.title_zh)} / ${esc(x.title_en)}</div></div><span class="badge ${x.official_confirmed?'ok':''}">${esc(x.issue_category)}${x.official_confirmed?' · 官方確認':''}</span><span>24H ${Number(x.mention_count_24h).toLocaleString()}</span><b>${x.growth_24h!=null?`${Number(x.growth_24h)>0?'+':''}${Number(x.growth_24h)}%`:'—'}</b></div>`).join('')||'<div class="empty">目前尚未偵測到達門檻的玩家問題。</div>'}</div>`;}
