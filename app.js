@@ -7,7 +7,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 const app = document.querySelector('#app');
-const state = { session:null, allowed:false, lang:localStorage.getItem('game-intel-lang') || 'zh', search:'', page:0, pageSize:36, gameFilter:'released', releaseFilter:localStorage.getItem('game-intel-release-filter') || 'unreleased', releasePage:0 };
+const state = { session:null, allowed:false, lang:localStorage.getItem('game-intel-lang') || 'zh', search:'', page:0, pageSize:36, gameFilter:'released', releaseFilter:localStorage.getItem('game-intel-release-filter') || 'unreleased', releasePage:0, issueSearch:'', issueGame:'all' };
 const fmtDate = (v, withTime=false) => v ? new Intl.DateTimeFormat('zh-TW', withTime ? {dateStyle:'medium',timeStyle:'short'} : {year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(v)) : 'TBA';
 const money = (v, c='TWD') => v == null ? '—' : Number(v) === 0 ? '免費' : c === 'TWD' ? `NT$${Number(v).toLocaleString()}` : `${c} ${Number(v).toLocaleString()}`;
 const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -631,14 +631,98 @@ async function pagePrices(){
   document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));
 }
 async function pageIssues(){
-  const {data,error}=await supabase.from('game_issues')
-    .select('*,games!inner(slug,name_en,name_zh_hant,cover_url)')
+  const selectFields='*,games!inner(id,slug,name_en,name_zh_hant,cover_url)';
+  const optionPromise=supabase.from('game_issues')
+    .select('game_id,mention_count_24h,games!inner(id,slug,name_en,name_zh_hant)')
     .eq('resolved',false)
     .order('mention_count_24h',{ascending:false})
-    .limit(300);
-  if(error)throw error;
-  const rows=data||[];
-  pageEl().innerHTML=`${header('玩家問題 / Issues','每筆問題都清楚標示所屬遊戲、問題類型、提及量、成長率與官方確認狀態。')}
+    .limit(1200);
+
+  let rows=[];
+  let issueError=null;
+  const search=state.issueSearch.trim();
+
+  if(state.issueGame!=='all'){
+    const r=await supabase.from('game_issues')
+      .select(selectFields)
+      .eq('resolved',false)
+      .eq('game_id',state.issueGame)
+      .order('mention_count_24h',{ascending:false})
+      .limit(200);
+    rows=r.data||[];
+    issueError=r.error;
+  }else if(search){
+    const safe=search.replace(/[%,()]/g,'').trim();
+    const gameMatch=await supabase.from('games')
+      .select('id')
+      .or(`name_en.ilike.%${safe}%,name_zh_hant.ilike.%${safe}%,original_name.ilike.%${safe}%`)
+      .limit(100);
+    if(gameMatch.error)throw gameMatch.error;
+    const ids=(gameMatch.data||[]).map(g=>g.id);
+    if(ids.length){
+      const r=await supabase.from('game_issues')
+        .select(selectFields)
+        .eq('resolved',false)
+        .in('game_id',ids)
+        .order('mention_count_24h',{ascending:false})
+        .limit(1000);
+      rows=r.data||[];
+      issueError=r.error;
+    }
+  }else{
+    const r=await supabase.from('game_issues')
+      .select(selectFields)
+      .eq('resolved',false)
+      .order('mention_count_24h',{ascending:false})
+      .limit(300);
+    rows=r.data||[];
+    issueError=r.error;
+  }
+  if(issueError)throw issueError;
+
+  const optionResult=await optionPromise;
+  if(optionResult.error)throw optionResult.error;
+
+  const optionMap=new Map();
+  for(const x of [...(optionResult.data||[]),...rows]){
+    const g=x.games;
+    if(!g||optionMap.has(String(x.game_id)))continue;
+    optionMap.set(String(x.game_id),{
+      id:String(x.game_id),
+      zh:g.name_zh_hant||'',
+      en:g.name_en||'',
+      label:g.name_zh_hant&&g.name_en&&g.name_zh_hant!==g.name_en
+        ? `${g.name_zh_hant} / ${g.name_en}`
+        : (g.name_zh_hant||g.name_en||'Unknown')
+    });
+  }
+  const gameOptions=[...optionMap.values()].sort((a,b)=>a.label.localeCompare(b.label,'zh-Hant'));
+  const shownGames=new Set(rows.map(x=>String(x.game_id))).size;
+  const currentGame=state.issueGame==='all'?null:optionMap.get(String(state.issueGame));
+
+  pageEl().innerHTML=`${header('玩家問題 / Issues','可用中文或英文遊戲名稱搜尋，也能直接篩選某款遊戲查看它的所有未解決問題。')}
+    <section class="issue-filter-panel">
+      <div class="issue-filter-controls">
+        <label class="issue-search-box">
+          <span>遊戲名稱搜尋 / Search game</span>
+          <input class="control" id="issue-search" value="${esc(state.issueSearch)}" placeholder="輸入中文或 English 遊戲名稱…">
+        </label>
+        <label class="issue-select-box">
+          <span>遊戲篩選 / Filter game</span>
+          <select class="control" id="issue-game-filter">
+            <option value="all">全部遊戲 / All games</option>
+            ${gameOptions.map(g=>`<option value="${esc(g.id)}" ${String(state.issueGame)===g.id?'selected':''}>${esc(g.label)}</option>`).join('')}
+          </select>
+        </label>
+        <button class="btn primary" id="issue-search-btn">搜尋 / Search</button>
+        <button class="btn ghost" id="issue-clear-btn">清除 / Clear</button>
+      </div>
+      <div class="issue-filter-summary">
+        <div><small>目前條件 / Filter</small><strong>${currentGame?esc(currentGame.label):(search?`名稱包含「${esc(search)}」`:'全部問題 / All issues')}</strong></div>
+        <div><small>遊戲 / Games</small><strong>${shownGames.toLocaleString()}</strong></div>
+        <div><small>問題 / Issues</small><strong>${rows.length.toLocaleString()}</strong></div>
+      </div>
+    </section>
     <div class="issue-list">
       ${rows.map(x=>`<article class="issue-game-card">
         <button class="issue-game-preview open-game" data-slug="${esc(x.games?.slug)}" aria-label="預覽 ${esc(x.games?.name_zh_hant||x.games?.name_en)}">
@@ -663,10 +747,40 @@ async function pageIssues(){
           <small>24H 成長 / Growth</small>
           <strong>${x.growth_24h!=null?`${Number(x.growth_24h)>0?'+':''}${Number(x.growth_24h)}%`:'—'}</strong>
         </div>
-        <button class="btn issue-preview-btn open-game" data-slug="${esc(x.games?.slug)}">預覽遊戲 / Preview</button>
-      </article>`).join('')||'<div class="empty">目前尚未偵測到達門檻的玩家問題。</div>'}
+        <div class="issue-card-actions">
+          <button class="btn issue-filter-game" data-game-id="${esc(x.game_id)}">只看此遊戲 / Filter</button>
+          <button class="btn primary open-game" data-slug="${esc(x.games?.slug)}">預覽 / Preview</button>
+        </div>
+      </article>`).join('')||'<div class="empty">沒有符合目前搜尋或篩選條件的玩家問題。</div>'}
     </div>`;
+
   bindCards();
+
+  const searchInput=document.querySelector('#issue-search');
+  document.querySelector('#issue-search-btn').onclick=()=>{
+    state.issueSearch=searchInput.value.trim();
+    state.issueGame='all';
+    pageIssues();
+  };
+  searchInput.onkeydown=e=>{if(e.key==='Enter')document.querySelector('#issue-search-btn').click();};
+
+  document.querySelector('#issue-game-filter').onchange=e=>{
+    state.issueGame=e.target.value;
+    if(state.issueGame!=='all')state.issueSearch='';
+    pageIssues();
+  };
+
+  document.querySelector('#issue-clear-btn').onclick=()=>{
+    state.issueSearch='';
+    state.issueGame='all';
+    pageIssues();
+  };
+
+  document.querySelectorAll('.issue-filter-game').forEach(b=>b.onclick=()=>{
+    state.issueGame=b.dataset.gameId;
+    state.issueSearch='';
+    pageIssues();
+  });
 }
 async function pageLive(){const {data,error}=await supabase.from('streaming_snapshots').select('*,games!inner(slug,name_en,name_zh_hant)').order('captured_at',{ascending:false}).limit(1000);if(error)throw error;const latest=new Map();for(const x of data||[]){const k=`${x.game_id}:${x.source}`;if(!latest.has(k))latest.set(k,x)}const combined=new Map();for(const x of latest.values()){const k=String(x.game_id),cur=combined.get(k)||{game:x.games,viewers:0,channels:0,sources:[]};cur.viewers+=Number(x.viewer_count);cur.channels+=Number(x.channel_count);cur.sources.push(x.source);combined.set(k,cur)}const rows=[...combined.values()].sort((a,b)=>b.viewers-a.viewers);pageEl().innerHTML=`${header('直播熱度 / Live Trends','Twitch + YouTube 分開採集，排行榜顯示合計觀看與頻道數。')}<div class="panel">${rows.map((x,i)=>`<div class="rank-row"><span class="rank">${String(i+1).padStart(2,'0')}</span><div><b>${esc(x.game?.name_zh_hant||x.game?.name_en)}</b><div class="sub">${esc(x.sources.join(' + '))}</div></div><b>${x.viewers.toLocaleString()}</b><span>${x.channels.toLocaleString()} 頻道</span></div>`).join('')||'<div class="empty">尚未取得直播快照；接通 Twitch / YouTube 同步後會自動累積。</div>'}</div>`;}
 
