@@ -172,3 +172,6 @@
 .price-chart-current-line{stroke:rgba(98,232,168,.32);stroke-width:1;stroke-dasharray:4 4}.price-chart-current{fill:#62e8a8;stroke:#0b1420;stroke-width:3}.price-chart-current-label{fill:#a9f4d1;font-size:9px;font-weight:800}
 .price-chart-note{margin-top:5px;color:var(--muted);font-size:8px}
 @media(max-width:720px){.price-history-chart-panel{padding:8px}.price-history-chart-head{display:grid;gap:5px}.price-history-chart{min-width:560px}.price-chart-legend{justify-content:flex-start}}
+
+.price-preview-link{text-decoration:none;color:inherit}
+a.btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
