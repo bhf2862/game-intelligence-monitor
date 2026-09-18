@@ -698,20 +698,166 @@ async function pageDashboard(){
 async function pageGames(){
   let q=supabase.from('games').select('*',{count:'exact'}).eq('release_status','released');
   if(state.gameplayFilters.length)q=q.contains('gameplay_tags',state.gameplayFilters);
-  if(state.search.trim()){const safe=state.search.replace(/[%,()]/g,'');q=q.or(`name_en.ilike.%${safe}%,name_zh_hant.ilike.%${safe}%,original_name.ilike.%${safe}%`)}
-  q=q.order('release_date',{ascending:false,nullsFirst:false}).range(state.page*state.pageSize,state.page*state.pageSize+state.pageSize-1);
-  const {data,count,error}=await q;if(error)throw error;
-  const games=await hydrateGames(data||[]);
-  const pages=Math.max(1,Math.ceil((count||0)/state.pageSize));
-  pageEl().innerHTML=`${header('已上市遊戲 / Released Games','只顯示已經正式上市的遊戲；未上市、預購與已公布遊戲統一移到「上市情報」。')}<div class="game-filter-summary released-summary"><div><span>分類 / Category</span><strong>✓ 已上市 / Released</strong></div><div><span>遊戲數量 / Games</span><strong>${(count||0).toLocaleString()} 款</strong></div><div><span>玩法條件 / Gameplay AND</span><strong>${esc(gameplayFilterSummary())}</strong></div><div><span>目前頁數 / Page</span><strong>${state.page+1} / ${pages}</strong></div></div><div class="gameplay-filter-section">${gameplayFilterControl('gameplay-filter')}</div><div class="toolbar gameplay-toolbar"><input class="control" id="game-search" value="${esc(state.search)}" placeholder="搜尋已上市遊戲…"><button class="btn" id="search-btn">搜尋 / Search</button>${state.search?'<button class="btn ghost" id="clear-search">清除 / Clear</button>':''}<button class="btn ghost" id="open-release-center">查看未上市 / Upcoming →</button></div><div class="grid">${games.map(gameCard).join('')||'<div class="empty">沒有符合條件的已上市遊戲。</div>'}</div><div class="pagination"><button class="btn" id="prev" ${state.page===0?'disabled':''}>← 上一頁</button><span class="page-indicator">第 ${state.page+1} / ${pages} 頁</span><button class="btn" id="next" ${state.page+1>=pages?'disabled':''}>下一頁 →</button></div>`;
-  bindCards();
-  bindGameplayFilter('gameplay-filter',()=>{state.page=0;pageGames();});
-  document.querySelector('#search-btn').onclick=()=>{state.search=document.querySelector('#game-search').value.trim();state.page=0;pageGames()};
-  document.querySelector('#game-search').onkeydown=e=>{if(e.key==='Enter')document.querySelector('#search-btn').click()};
-  document.querySelector('#clear-search')?.addEventListener('click',()=>{state.search='';state.page=0;pageGames()});
-  document.querySelector('#open-release-center').onclick=()=>{state.releaseFilter='unreleased';state.releasePage=0;location.hash='calendar'};
-  document.querySelector('#prev').onclick=()=>{state.page=Math.max(0,state.page-1);pageGames()};
-  document.querySelector('#next').onclick=()=>{state.page++;pageGames()};
+  if(state.search.trim()){
+    const safe=state.search.replace(/[%,()]/g,'');
+    q=q.or(`name_en.ilike.%${safe}%,name_zh_hant.ilike.%${safe}%,original_name.ilike.%${safe}%`);
+  }
+
+  const rangeFrom=state.page*state.pageSize;
+  const rangeTo=rangeFrom+state.pageSize-1;
+  q=q.order('release_date',{ascending:false,nullsFirst:false}).range(rangeFrom,rangeTo);
+
+  const result=await q;
+  const data=result.data||[];
+  const count=Number(result.count||0);
+  const error=result.error||null;
+  const httpStatus=Number(result.status||0);
+  const statusText=result.statusText||'—';
+
+  let games=data;
+  let hydrateError=null;
+  if(!error&&data.length){
+    try{
+      games=await hydrateGames(data);
+    }catch(err){
+      hydrateError=err;
+      console.error('[Game Intel] hydrateGames failed',err);
+      games=data;
+    }
+  }
+
+  const filtersActive=Boolean(state.search.trim()||state.gameplayFilters.length);
+  let diagnosis='正常 / Query OK';
+  let diagnosisClass='ok';
+  if(error){
+    const code=String(error.code||'');
+    const msg=String(error.message||'').toLowerCase();
+    if(httpStatus===401||httpStatus===403||code==='42501'||msg.includes('permission')||msg.includes('jwt')){
+      diagnosis='權限 / RLS / Session 問題';
+      diagnosisClass='danger';
+    }else{
+      diagnosis='欄位或 Supabase/PostgREST 查詢錯誤';
+      diagnosisClass='danger';
+    }
+  }else if(count===0&&data.length===0){
+    if(filtersActive){
+      diagnosis='查詢正常，但前端搜尋／玩法 AND 篩選後為 0 筆';
+      diagnosisClass='warn';
+    }else{
+      diagnosis='HTTP 正常但無資料；目前沒有前端篩選，高機率是 RLS / Session 資料權限';
+      diagnosisClass='danger';
+    }
+  }else if(data.length===0&&count>0){
+    diagnosis='總資料存在，但目前分頁超出範圍';
+    diagnosisClass='warn';
+  }else if(hydrateError){
+    diagnosis='games 主查詢正常，但平台／價格／評價補充資料載入失敗';
+    diagnosisClass='warn';
+  }
+
+  const pages=Math.max(1,Math.ceil(count/state.pageSize));
+  const errorMessage=error?.message||'—';
+  const errorCode=error?.code||'—';
+  const errorDetails=error?.details||error?.hint||'—';
+  const activeGameplay=state.gameplayFilters.length
+    ? state.gameplayFilters.map(gameplayTagLabel).join(' + ')
+    : '無 / None';
+  const activeSearch=state.search.trim()||'無 / None';
+
+  pageEl().innerHTML=`${header('已上市遊戲 / Released Games','只顯示已經正式上市的遊戲；未上市、預購與已公布遊戲統一移到「上市情報」。')}
+    <section class="query-diagnostic ${diagnosisClass}">
+      <div class="query-diagnostic-head">
+        <div>
+          <small>Supabase 查詢診斷 / Query Diagnostics</small>
+          <strong>${esc(diagnosis)}</strong>
+        </div>
+        <button class="btn ghost" id="copy-query-diagnostic" type="button">複製診斷 / Copy</button>
+      </div>
+      <div class="query-diagnostic-grid">
+        <div><small>HTTP 狀態</small><strong>${httpStatus||'—'} ${esc(statusText)}</strong></div>
+        <div><small>回傳筆數 / Returned</small><strong>${data.length.toLocaleString()}</strong></div>
+        <div><small>查詢總筆數 / Count</small><strong>${count.toLocaleString()}</strong></div>
+        <div><small>分頁範圍 / Range</small><strong>${rangeFrom}–${rangeTo}</strong></div>
+        <div><small>錯誤 Code</small><strong>${esc(errorCode)}</strong></div>
+        <div><small>Hydration</small><strong>${hydrateError?'失敗 / Failed':'正常 / OK'}</strong></div>
+      </div>
+      <div class="query-diagnostic-details">
+        <div><small>錯誤訊息 / Error</small><code>${esc(errorMessage)}</code></div>
+        <div><small>Details / Hint</small><code>${esc(errorDetails)}</code></div>
+        <div><small>搜尋 / Search</small><code>${esc(activeSearch)}</code></div>
+        <div><small>玩法 AND / Gameplay</small><code>${esc(activeGameplay)}</code></div>
+        ${hydrateError?`<div><small>補充資料錯誤 / Hydration error</small><code>${esc(hydrateError?.message||String(hydrateError))}</code></div>`:''}
+      </div>
+    </section>
+
+    <div class="game-filter-summary released-summary">
+      <div><span>分類 / Category</span><strong>✓ 已上市 / Released</strong></div>
+      <div><span>遊戲數量 / Games</span><strong>${count.toLocaleString()} 款</strong></div>
+      <div><span>玩法條件 / Gameplay AND</span><strong>${esc(gameplayFilterSummary())}</strong></div>
+      <div><span>目前頁數 / Page</span><strong>${state.page+1} / ${pages}</strong></div>
+    </div>
+    <div class="gameplay-filter-section">${gameplayFilterControl('gameplay-filter')}</div>
+    <div class="toolbar gameplay-toolbar">
+      <input class="control" id="game-search" value="${esc(state.search)}" placeholder="搜尋已上市遊戲…">
+      <button class="btn" id="search-btn">搜尋 / Search</button>
+      ${state.search?'<button class="btn ghost" id="clear-search">清除 / Clear</button>':''}
+      ${filtersActive?'<button class="btn ghost" id="clear-all-game-filters">清除全部條件 / Reset all</button>':''}
+      <button class="btn ghost" id="open-release-center">查看未上市 / Upcoming →</button>
+    </div>
+
+    ${error
+      ? `<div class="empty query-error-empty">Supabase 主查詢失敗，請查看上方診斷資訊。</div>`
+      : `<div class="grid">${games.map(gameCard).join('')||'<div class="empty">沒有符合條件的已上市遊戲。</div>'}</div>
+         <div class="pagination"><button class="btn" id="prev" ${state.page===0?'disabled':''}>← 上一頁</button><span class="page-indicator">第 ${state.page+1} / ${pages} 頁</span><button class="btn" id="next" ${state.page+1>=pages?'disabled':''}>下一頁 →</button></div>`}
+  `;
+
+  const diagnosticText=[
+    `HTTP: ${httpStatus||'—'} ${statusText}`,
+    `Returned: ${data.length}`,
+    `Count: ${count}`,
+    `Range: ${rangeFrom}-${rangeTo}`,
+    `Error code: ${errorCode}`,
+    `Error: ${errorMessage}`,
+    `Details: ${errorDetails}`,
+    `Search: ${activeSearch}`,
+    `Gameplay AND: ${activeGameplay}`,
+    `Hydration: ${hydrateError?(hydrateError?.message||String(hydrateError)):'OK'}`,
+    `Diagnosis: ${diagnosis}`
+  ].join('\n');
+
+  document.querySelector('#copy-query-diagnostic').onclick=async()=>{
+    try{
+      await navigator.clipboard.writeText(diagnosticText);
+      toast('診斷資訊已複製 / Diagnostics copied');
+    }catch{
+      toast(diagnosticText);
+    }
+  };
+
+  if(!error){
+    bindCards();
+    bindGameplayFilter('gameplay-filter',()=>{state.page=0;pageGames();});
+    document.querySelector('#search-btn').onclick=()=>{
+      state.search=document.querySelector('#game-search').value.trim();
+      state.page=0;
+      pageGames();
+    };
+    document.querySelector('#game-search').onkeydown=e=>{if(e.key==='Enter')document.querySelector('#search-btn').click();};
+    document.querySelector('#clear-search')?.addEventListener('click',()=>{state.search='';state.page=0;pageGames();});
+    document.querySelector('#clear-all-game-filters')?.addEventListener('click',()=>{
+      state.search='';
+      state.gameplayFilters=[];
+      saveGameplayFilters();
+      state.page=0;
+      pageGames();
+    });
+    document.querySelector('#open-release-center').onclick=()=>{state.releaseFilter='unreleased';state.releasePage=0;location.hash='calendar';};
+    document.querySelector('#prev').onclick=()=>{state.page=Math.max(0,state.page-1);pageGames();};
+    document.querySelector('#next').onclick=()=>{state.page++;pageGames();};
+  }else{
+    document.querySelector('#search-btn').onclick=()=>pageGames();
+    document.querySelector('#open-release-center').onclick=()=>{location.hash='calendar';};
+  }
 }
 async function pageCalendar(){
   const counts=await loadReleaseCounts();
