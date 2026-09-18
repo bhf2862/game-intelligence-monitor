@@ -546,6 +546,669 @@ async function pageCalendar(){
   document.querySelector('#release-next').onclick=()=>{state.releasePage++;pageCalendar()};
 }
 
+function renderPriceHistoryTrend(history,currentPrice,currentAt,currency){
+  const raw=(history||[])
+    .map(h=>({price:Number(h.price),at:h.captured_at}))
+    .filter(x=>Number.isFinite(x.price)&&x.at)
+    .sort((a,b)=>new Date(a.at)-new Date(b.at));
+
+  const current=Number(currentPrice);
+  const currentTime=currentAt||new Date().toISOString();
+  const points=[...raw];
+  const last=points.at(-1);
+  if(Number.isFinite(current)){
+    const sameAsLast=last&&Number(last.price)===current&&Math.abs(new Date(currentTime)-new Date(last.at))<6*3600000;
+    if(!sameAsLast)points.push({price:current,at:currentTime,current:true});
+    else last.current=true;
+  }
+
+  if(!points.length){
+    return '<section class="price-history-chart-panel"><div class="empty">尚無價格歷史資料 / No price history yet</div></section>';
+  }
+
+  const prices=points.map(x=>x.price);
+  const low=Math.min(...prices);
+  const lowIndex=prices.indexOf(low);
+  const currentIndex=Math.max(0,points.findIndex(x=>x.current));
+  const actualCurrentIndex=currentIndex>=0?currentIndex:points.length-1;
+  points[actualCurrentIndex].current=true;
+
+  const width=760,height=250,left=54,right=26,top=28,bottom=44;
+  const innerW=width-left-right,innerH=height-top-bottom;
+  const times=points.map(x=>new Date(x.at).getTime());
+  const minT=Math.min(...times),maxT=Math.max(...times);
+  const minP=Math.min(...prices),maxP=Math.max(...prices);
+  const rangeP=Math.max(1,maxP-minP);
+  const padP=Math.max(1,rangeP*.12);
+  const yMin=Math.max(0,minP-padP),yMax=maxP+padP;
+  const x=(i)=>{
+    if(points.length===1||minT===maxT)return left+innerW/2;
+    return left+((times[i]-minT)/(maxT-minT))*innerW;
+  };
+  const y=(v)=>top+innerH-((v-yMin)/(yMax-yMin))*innerH;
+  const poly=points.map((p,i)=>`${x(i).toFixed(1)},${y(p.price).toFixed(1)}`).join(' ');
+
+  const formatAxisPrice=v=>{
+    if(currency==='TWD')return 'NT
+  if(!productId)return;
+  closeGamePreview();
+  const shell=document.createElement('div');
+  shell.className='game-preview-backdrop';
+  shell.innerHTML='<div class="game-preview-modal price-preview-modal"><div class="game-preview-loading">讀取價格預覽 / Loading price preview…</div></div>';
+  document.body.appendChild(shell);
+  shell.addEventListener('click',e=>{if(e.target===shell)closeGamePreview();});
+  try{
+    const {data:p,error}=await supabase.from('store_products')
+      .select('*,games!inner(id,slug,name_en,name_zh_hant,cover_url,release_date,release_status,gameplay_tags)')
+      .eq('id',Number(productId))
+      .single();
+    if(error)throw error;
+
+    const {data:history,error:histError}=await supabase.from('price_history')
+      .select('price,list_price,discount_percent,currency,captured_at')
+      .eq('product_id',Number(productId))
+      .order('captured_at',{ascending:true});
+    if(histError)throw histError;
+
+    const g=p.games||{};
+    const hist=history||[];
+    const prices=hist.map(x=>Number(x.price)).filter(Number.isFinite);
+    const discounts=hist.map(x=>Number(x.discount_percent||0)).filter(x=>Number.isFinite(x)&&x>0);
+    const previousHistoricalLow=prices.length?Math.min(...prices):null;
+    const historicalBestDiscount=discounts.length?Math.max(...discounts):null;
+    const current=Number(p.current_price);
+    const list=p.list_price==null?null:Number(p.list_price);
+    const discount=Number(p.discount_percent||0);
+    const historicalLow=Number.isFinite(current)
+      ? (previousHistoricalLow==null?current:Math.min(previousHistoricalLow,current))
+      : previousHistoricalLow;
+
+    let comparison='歷史資料累積中 / History accumulating';
+    let compareClass='';
+    if(previousHistoricalLow!=null&&Number.isFinite(current)){
+      if(current<previousHistoricalLow){comparison='🔥 新歷史低價 / New historical low';compareClass='ok';}
+      else if(current===previousHistoricalLow){comparison='＝ 歷史最低價 / Matches historical low';compareClass='ok';}
+      else comparison=`目前比歷史最低高 ${money(current-previousHistoricalLow,p.currency)}`;
+    }
+
+    const offerEnd=(()=>{
+      if(discount<=0)return {main:'目前無優惠',sub:'No active offer'};
+      if(!p.sale_end)return {main:'期限未提供',sub:'Official end date unavailable'};
+      const end=new Date(p.sale_end);
+      const ms=end-Date.now();
+      if(ms<=0)return {main:'優惠已結束',sub:fmtDate(p.sale_end,true)};
+      const hours=Math.max(0,Math.floor(ms/3600000));
+      const days=Math.floor(hours/24);
+      return {main:days>0?`剩 ${days} 天 ${hours%24} 小時`:`剩 ${hours} 小時`,sub:`至 ${fmtDate(p.sale_end,true)}`};
+    })();
+
+    const title=g.name_zh_hant||g.name_en||'Game';
+    shell.innerHTML=`<div class="game-preview-modal price-preview-modal" role="dialog" aria-modal="true" aria-label="${esc(title)} 價格預覽">
+      <button class="game-preview-close" type="button" aria-label="關閉預覽">×</button>
+      <div class="price-preview-hero">
+        <div class="price-preview-cover native-cover">${gameCoverInner(g)}</div>
+        <div class="price-preview-title">
+          <span class="badge ${statusClass(g.release_status)}">${esc(statusZh(g.release_status))}</span>
+          <h2>${esc(title)}</h2>
+          <p>${esc(g.name_en||'')}</p>
+          <div class="price-labels">
+            <span class="store-badge">${esc(p.platform||'Platform')}</span>
+            <span class="store-badge">${esc(p.store||'Store')}</span>
+            <span class="store-badge">${esc(p.edition||'Edition')}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="price-preview-grid">
+        <div><small>原價 / List</small><strong>${money(list,p.currency)}</strong></div>
+        <div><small>現價 / Current</small><strong>${money(p.current_price,p.currency)}</strong>${discount>0?`<span class="badge ok">-${discount}%</span>`:''}</div>
+        <div><small>優惠期限 / Offer ends</small><strong>${esc(offerEnd.main)}</strong><span>${esc(offerEnd.sub)}</span></div>
+        <div><small>歷史最低 / Historical low</small><strong>${historicalLow==null?'—':money(historicalLow,p.currency)}</strong></div>
+        <div><small>歷史最大折扣 / Best discount</small><strong>${historicalBestDiscount==null?'—':`-${historicalBestDiscount}%`}</strong></div>
+        <div><small>價格快照 / Snapshots</small><strong>${hist.length.toLocaleString()}</strong></div>
+      </div>
+
+      <div class="price-preview-comparison">
+        <small>與之前優惠相比 / vs Previous deals</small>
+        <strong class="${compareClass}">${esc(comparison)}</strong>
+      </div>
+
+      ${renderPriceHistoryTrend(hist,p.current_price,p.updated_at,p.currency)}
+
+      ${Array.isArray(g.gameplay_tags)&&g.gameplay_tags.length?`<div class="game-preview-gameplay"><small>玩法分類 / Gameplay</small><div class="gameplay-row">${renderGameplayTags(g,8)}</div></div>`:''}
+
+      <div class="game-preview-actions">
+        <button class="btn" id="price-preview-close">關閉 / Close</button>
+        <button class="btn" id="price-preview-game">遊戲情報 / Game details</button>
+        ${p.store_url?`<button class="btn primary" id="price-preview-store">前往商店 / Store ↗</button>`:''}
+      </div>
+    </div>`;
+
+    shell.querySelector('.game-preview-close').onclick=closeGamePreview;
+    shell.querySelector('#price-preview-close').onclick=closeGamePreview;
+    shell.querySelector('#price-preview-game').onclick=()=>{closeGamePreview();location.hash=`game/${g.slug}`;};
+    shell.querySelector('#price-preview-store')?.addEventListener('click',()=>window.open(p.store_url,'_blank','noopener,noreferrer'));
+    bindCoverImages(shell);
+    bindCards();
+  }catch(err){
+    shell.innerHTML=`<div class="game-preview-modal price-preview-modal"><button class="game-preview-close" type="button">×</button><div class="empty">價格預覽讀取失敗：${esc(err?.message||err)}</div></div>`;
+    shell.querySelector('.game-preview-close').onclick=closeGamePreview;
+  }
+}
+function bindPricePreviews(){
+  const page=pageEl();
+  if(!page||page.dataset.pricePreviewDelegated==='1')return;
+  page.dataset.pricePreviewDelegated='1';
+  page.addEventListener('click',e=>{
+    const target=e.target.closest('[data-price-preview]');
+    if(!target)return;
+    e.preventDefault();
+    e.stopPropagation();
+    showPricePreview(target.dataset.pricePreview);
+  });
+}
+async function pagePrices(){
+  const {data,error}=await supabase.from('store_products')
+    .select('*,games!inner(id,slug,name_en,name_zh_hant,cover_url)')
+    .eq('region','TW')
+    .order('discount_percent',{ascending:false})
+    .order('updated_at',{ascending:false})
+    .limit(500);
+  if(error)throw error;
+  const rows=data||[];
+  const ids=rows.map(x=>x.id);
+  const {data:hist,error:histErr}=ids.length
+    ? await supabase.from('price_history')
+        .select('product_id,price,list_price,discount_percent,currency,captured_at')
+        .in('product_id',ids)
+        .order('captured_at',{ascending:true})
+    : {data:[],error:null};
+  if(histErr)throw histErr;
+
+  const historyByProduct=new Map();
+  for(const h of hist||[]){
+    const k=String(h.product_id);
+    const list=historyByProduct.get(k)||[];
+    list.push(h);
+    historyByProduct.set(k,list);
+  }
+
+  const fmtOfferEnd=(x)=>{
+    if(Number(x.discount_percent||0)<=0)return {main:'目前無優惠',sub:'No active offer',cls:''};
+    if(!x.sale_end)return {main:'期限未提供',sub:'End date unavailable',cls:'warn'};
+    const end=new Date(x.sale_end);
+    const ms=end-Date.now();
+    if(ms<=0)return {main:'優惠已結束',sub:fmtDate(x.sale_end,true),cls:'danger'};
+    const hours=Math.floor(ms/3600000);
+    const days=Math.floor(hours/24);
+    return {
+      main:days>=1?`剩 ${days} 天 ${hours%24} 小時`:`剩 ${hours} 小時`,
+      sub:`至 ${fmtDate(x.sale_end,true)}`,
+      cls:days<=1?'warn':'ok'
+    };
+  };
+
+  const compareHistory=(x)=>{
+    const all=historyByProduct.get(String(x.id))||[];
+    const currentAt=x.updated_at?new Date(x.updated_at).getTime():Date.now();
+    const previous=all.filter(h=>new Date(h.captured_at).getTime()<currentAt-1000);
+    const previousOffers=previous.filter(h=>Number(h.discount_percent||0)>0);
+    const currentPrice=x.current_price==null?null:Number(x.current_price);
+    const currentDiscount=Number(x.discount_percent||0);
+
+    if(!previous.length){
+      return {
+        low:null,
+        maxDiscount:null,
+        offerCount:0,
+        badge:'首次追蹤 / First tracked',
+        detail:'尚無先前價格可比較',
+        cls:''
+      };
+    }
+    const prices=previous.map(h=>Number(h.price)).filter(Number.isFinite);
+    const discounts=previousOffers.map(h=>Number(h.discount_percent||0)).filter(Number.isFinite);
+    const low=prices.length?Math.min(...prices):null;
+    const maxDiscount=discounts.length?Math.max(...discounts):null;
+    let badge='歷史資料 / History';
+    let detail=`已累積 ${previous.length} 筆先前價格快照`;
+    let cls='';
+
+    if(currentPrice!=null&&low!=null){
+      if(currentPrice<low){badge='🔥 新歷史低價 / New low';detail=`比先前最低價少 ${money(low-currentPrice,x.currency)}`;cls='ok';}
+      else if(currentPrice===low){badge='＝ 歷史最低價 / Matches low';detail=`等同先前最低價 ${money(low,x.currency)}`;cls='ok';}
+      else{detail=`先前最低 ${money(low,x.currency)}，目前高 ${money(currentPrice-low,x.currency)}`;}
+    }
+    if(currentDiscount>0&&maxDiscount!=null){
+      if(currentDiscount>maxDiscount){badge='🏷 最大折扣 / Best discount';detail+=` · 比先前最大折扣多 ${currentDiscount-maxDiscount} 個百分點`;cls='ok';}
+      else if(currentDiscount===maxDiscount){detail+=` · 等同先前最大折扣 -${maxDiscount}%`;}
+      else{detail+=` · 先前最大折扣 -${maxDiscount}%`;}
+    }
+    return {low,maxDiscount,offerCount:previousOffers.length,badge,detail,cls};
+  };
+
+  const platformMeta=(platform,store)=>{
+    const p=String(platform||store||'Store').toLowerCase();
+    if(p.includes('steam'))return ['ST','Steam'];
+    if(p.includes('playstation')||p.includes('ps5')||p.includes('ps4'))return ['PS','PlayStation'];
+    if(p.includes('xbox'))return ['XB','Xbox'];
+    if(p.includes('nintendo')||p.includes('switch'))return ['NS','Nintendo'];
+    if(p.includes('epic'))return ['EP','Epic'];
+    return ['◈',platform||store||'Store'];
+  };
+
+  const activeDeals=rows.filter(x=>Number(x.discount_percent||0)>0).length;
+  pageEl().innerHTML=`${header('價格追蹤 / Price Tracker','圖片、平台、優惠期限與歷史優惠比較集中顯示；TW / NTD 優先。')}
+    <div class="price-summary-grid">
+      <div><span>商品 / Products</span><strong>${rows.length.toLocaleString()}</strong></div>
+      <div><span>目前優惠 / Active deals</span><strong>${activeDeals.toLocaleString()}</strong></div>
+      <div><span>歷史快照 / History</span><strong>${(hist||[]).length.toLocaleString()}</strong></div>
+    </div>
+    <div class="price-cards">
+      ${rows.map(x=>{
+        const game=x.games||{};
+        const [icon,platformName]=platformMeta(x.platform,x.store);
+        const offer=fmtOfferEnd(x);
+        const history=compareHistory(x);
+        const cover=game.cover_url?esc(game.cover_url):'';
+        const editionZh=({'Standard':'標準版','Deluxe':'豪華版','Ultimate':'終極版','Collector':'典藏版','DLC':'下載內容','Bundle':'組合包'})[x.edition]||x.edition||'版本';
+        return `<article class="price-card price-card-rich">
+          <button class="price-cover native-cover price-preview-trigger" data-price-preview="${esc(x.id)}" aria-label="價格預覽 ${esc(game.name_zh_hant||game.name_en)}">${gameCoverInner(game)}</button>
+          <div class="price-game">
+            <strong>${esc(game.name_zh_hant||game.name_en)}</strong>
+            <span>${esc(game.name_en||'')}</span>
+            <div class="price-labels">
+              <span class="store-badge"><i>${icon}</i>${esc(platformName)}</span>
+              <span class="store-badge">${esc(x.store||'Store')}</span>
+              <span class="store-badge">${esc(editionZh)} / ${esc(x.edition||'Edition')}</span>
+            </div>
+          </div>
+          <div class="price-value">
+            <small>原價 / List</small>
+            <span>${money(x.list_price,x.currency)}</span>
+          </div>
+          <div class="price-value current">
+            <small>現價 / Current</small>
+            <b>${money(x.current_price,x.currency)}</b>
+            ${Number(x.discount_percent)>0?`<span class="badge ok">-${Number(x.discount_percent)}%</span>`:''}
+          </div>
+          <div class="price-value offer-end">
+            <small>優惠期限 / Offer ends</small>
+            <b class="${offer.cls}">${offer.main}</b>
+            <span>${offer.sub}</span>
+          </div>
+          <div class="price-history-compare">
+            <small>與之前優惠相比 / vs Previous deals</small>
+            <span class="badge ${history.cls}">${history.badge}</span>
+            <p>${esc(history.detail)}</p>
+            <div class="price-history-mini">
+              <span>先前最低 <b>${history.low==null?'—':money(history.low,x.currency)}</b></span>
+              <span>先前最大折扣 <b>${history.maxDiscount==null?'—':`-${history.maxDiscount}%`}</b></span>
+              <span>先前優惠快照 <b>${history.offerCount}</b></span>
+            </div>
+          </div>
+          <div class="price-open">
+            <button class="btn primary price-preview-trigger" data-price-preview="${esc(x.id)}">價格預覽 / Price Preview</button>
+            ${x.store_url?`<button class="btn" data-url="${esc(x.store_url)}">前往商店 ↗</button>`:''}
+          </div>
+        </article>`;
+      }).join('')||'<div class="empty">尚無價格資料</div>'}
+    </div>`;
+  bindCards();
+  bindPricePreviews();
+  document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));
+}
+
+async function loadIssueTrend(gameId){
+  try{
+    const {data,error}=await supabase.functions.invoke('sync-game-issue-trend',{body:{game_id:Number(gameId)}});
+    if(!error&&data?.ok&&Array.isArray(data.hours))return {data,message:'',live:true};
+    const message=data?.error||error?.message||'即時趨勢暫時無法更新';
+    const fallback=await loadStoredIssueTrend(gameId);
+    return fallback.data?{data:fallback.data,message:`${message}；顯示最近已保存資料`,live:false}:{data:null,message,live:false};
+  }catch(err){
+    const fallback=await loadStoredIssueTrend(gameId);
+    return fallback.data?{data:fallback.data,message:'即時更新失敗；顯示最近已保存資料',live:false}:{data:null,message:err?.message||'趨勢讀取失敗',live:false};
+  }
+}
+async function loadStoredIssueTrend(gameId){
+  const hourMs=3600000;
+  const currentHour=Math.floor(Date.now()/hourMs)*hourMs;
+  const startHour=currentHour-23*hourMs;
+  const {data,error}=await supabase.from('issue_hourly_mentions')
+    .select('bucket_start,mention_count,issue_category,sample_size,captured_at')
+    .eq('game_id',Number(gameId))
+    .gte('bucket_start',new Date(startHour).toISOString())
+    .order('bucket_start',{ascending:true});
+  if(error||!(data||[]).length)return {data:null,error};
+  const byHour=new Map();
+  let sampleReviews=0;
+  for(const row of data||[]){
+    const key=new Date(row.bucket_start).toISOString();
+    byHour.set(key,(byHour.get(key)||0)+Number(row.mention_count||0));
+    sampleReviews=Math.max(sampleReviews,Number(row.sample_size||0));
+  }
+  const hours=Array.from({length:24},(_,i)=>{
+    const bucket_start=new Date(startHour+i*hourMs).toISOString();
+    return {bucket_start,total:byHour.get(bucket_start)||0,categories:{}};
+  });
+  const peak=hours.reduce((best,row)=>row.total>best.total?row:best,hours[0]);
+  return {data:{ok:true,source:'Stored hourly issue data',sample_reviews:sampleReviews,hours,peak}};
+}
+function issueTrendTimeLabel(value){
+  if(!value)return '—';
+  return new Intl.DateTimeFormat('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
+}
+function issueTrendHourLabel(value){
+  return new Intl.DateTimeFormat('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
+}
+function renderIssueTrendChart(trend,message=''){
+  const hours=Array.isArray(trend?.hours)?trend.hours:[];
+  if(!hours.length)return `<section class="issue-trend-panel"><div class="empty">${esc(message||'目前沒有 24 小時趨勢資料。')}</div></section>`;
+  const totals=hours.map(x=>Number(x.total||0));
+  const rawMax=Math.max(...totals,0);
+  const max=Math.max(1,rawMax);
+  const width=760,height=230,left=42,right=18,top=24,bottom=38;
+  const innerW=width-left-right,innerH=height-top-bottom;
+  const x=i=>left+(hours.length<=1?0:(i/(hours.length-1))*innerW);
+  const y=v=>top+innerH-(Number(v||0)/max)*innerH;
+  const points=hours.map((h,i)=>`${x(i).toFixed(1)},${y(h.total).toFixed(1)}`).join(' ');
+  const peakIndex=totals.indexOf(rawMax);
+  const peak=hours[Math.max(0,peakIndex)]||hours[0];
+  const peakX=x(Math.max(0,peakIndex)),peakY=y(peak.total);
+  const grid=[0,.25,.5,.75,1].map(r=>{
+    const gy=top+innerH-innerH*r;
+    const val=Math.round(max*r);
+    return `<line x1="${left}" y1="${gy}" x2="${width-right}" y2="${gy}" class="issue-chart-grid"/><text x="${left-8}" y="${gy+3}" text-anchor="end" class="issue-chart-axis">${val}</text>`;
+  }).join('');
+  const labels=hours.map((h,i)=>i%4===0||i===hours.length-1?`<text x="${x(i)}" y="${height-12}" text-anchor="middle" class="issue-chart-axis">${esc(issueTrendHourLabel(h.bucket_start))}</text>`:'').join('');
+  const area=`${left},${top+innerH} ${points} ${width-right},${top+innerH}`;
+  const peakText=rawMax>0?`${esc(issueTrendHourLabel(peak.bucket_start))} · ${Number(peak.total).toLocaleString()}`:'尚無提及';
+  return `<section class="issue-trend-panel">
+    <div class="section-head issue-trend-head">
+      <div><h2>24 小時問題提及趨勢 / 24H Mentions</h2><p>依最近 Steam 負評樣本逐小時統計；同一則評論若符合多個問題類型，會計入多個提及。</p></div>
+      <div class="issue-peak-card"><small>高峰時間 / Peak</small><strong>${rawMax>0?esc(issueTrendTimeLabel(peak.bucket_start)):'—'}</strong><span>${rawMax.toLocaleString()} 次提及</span></div>
+    </div>
+    ${message?`<div class="issue-trend-note">${esc(message)}</div>`:''}
+    <div class="issue-trend-meta"><span>樣本負評 / Sample reviews <b>${Number(trend.sample_reviews||0).toLocaleString()}</b></span><span>資料來源 / Source <b>${esc(trend.source||'Steam')}</b></span></div>
+    <div class="issue-chart-wrap">
+      <svg class="issue-trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="最近 24 小時問題提及量趨勢，高峰 ${peakText}">
+        <polygon points="${area}" class="issue-chart-area"/>
+        ${grid}
+        <polyline points="${points}" class="issue-chart-line"/>
+        ${rawMax>0?`<line x1="${peakX}" y1="${top}" x2="${peakX}" y2="${top+innerH}" class="issue-chart-peak-line"/><circle cx="${peakX}" cy="${peakY}" r="5" class="issue-chart-peak"/><text x="${Math.min(width-right-70,Math.max(left+70,peakX))}" y="${Math.max(15,peakY-10)}" text-anchor="middle" class="issue-chart-peak-label">${peakText}</text>`:''}
+        ${labels}
+      </svg>
+    </div>
+  </section>`;
+}
+async function pageIssues(){
+  const selectFields='*,games!inner(id,slug,name_en,name_zh_hant,cover_url)';
+  const optionPromise=supabase.from('game_issues')
+    .select('game_id,mention_count_24h,games!inner(id,slug,name_en,name_zh_hant,cover_url)')
+    .eq('resolved',false)
+    .order('mention_count_24h',{ascending:false})
+    .limit(1200);
+
+  let rows=[];
+  let issueError=null;
+  const search=state.issueSearch.trim();
+
+  if(state.issueGame!=='all'){
+    const r=await supabase.from('game_issues')
+      .select(selectFields)
+      .eq('resolved',false)
+      .eq('game_id',state.issueGame)
+      .order('mention_count_24h',{ascending:false})
+      .limit(200);
+    rows=r.data||[];
+    issueError=r.error;
+  }else if(search){
+    const safe=search.replace(/[%,()]/g,'').trim();
+    const gameMatch=await supabase.from('games')
+      .select('id')
+      .or(`name_en.ilike.%${safe}%,name_zh_hant.ilike.%${safe}%,original_name.ilike.%${safe}%`)
+      .limit(100);
+    if(gameMatch.error)throw gameMatch.error;
+    const ids=(gameMatch.data||[]).map(g=>g.id);
+    if(ids.length){
+      const r=await supabase.from('game_issues')
+        .select(selectFields)
+        .eq('resolved',false)
+        .in('game_id',ids)
+        .order('mention_count_24h',{ascending:false})
+        .limit(1000);
+      rows=r.data||[];
+      issueError=r.error;
+    }
+  }else{
+    const r=await supabase.from('game_issues')
+      .select(selectFields)
+      .eq('resolved',false)
+      .order('mention_count_24h',{ascending:false})
+      .limit(300);
+    rows=r.data||[];
+    issueError=r.error;
+  }
+  if(issueError)throw issueError;
+
+  const optionResult=await optionPromise;
+  if(optionResult.error)throw optionResult.error;
+
+  const optionMap=new Map();
+  for(const x of [...(optionResult.data||[]),...rows]){
+    const g=x.games;
+    if(!g||optionMap.has(String(x.game_id)))continue;
+    optionMap.set(String(x.game_id),{
+      id:String(x.game_id),
+      slug:g.slug||'',
+      cover_url:g.cover_url||'',
+      zh:g.name_zh_hant||'',
+      en:g.name_en||'',
+      label:g.name_zh_hant&&g.name_en&&g.name_zh_hant!==g.name_en
+        ? `${g.name_zh_hant} / ${g.name_en}`
+        : (g.name_zh_hant||g.name_en||'Unknown')
+    });
+  }
+  const gameOptions=[...optionMap.values()].sort((a,b)=>a.label.localeCompare(b.label,'zh-Hant'));
+  const shownGames=new Set(rows.map(x=>String(x.game_id))).size;
+  const currentGame=state.issueGame==='all'?null:optionMap.get(String(state.issueGame));
+  const selectedProblemCount=currentGame?rows.length:0;
+  const selectedMentions24h=currentGame?rows.reduce((sum,x)=>sum+Number(x.mention_count_24h||0),0):0;
+  const selectedTopIssue=currentGame&&rows.length
+    ? [...rows].sort((a,b)=>Number(b.mention_count_24h||0)-Number(a.mention_count_24h||0))[0]
+    : null;
+  const selectedLatest=currentGame
+    ? rows.reduce((latest,x)=>{
+        const value=x.last_seen||x.first_seen||null;
+        if(!value)return latest;
+        if(!latest||new Date(value)>new Date(latest))return value;
+        return latest;
+      },null)
+    : null;
+  let selectedTrend=null;
+  let selectedTrendMessage='';
+  if(currentGame){
+    const trendResult=await loadIssueTrend(state.issueGame);
+    selectedTrend=trendResult.data;
+    selectedTrendMessage=trendResult.message||'';
+  }
+
+  pageEl().innerHTML=`${header('玩家問題 / Issues','可用中文或英文遊戲名稱搜尋，也能直接篩選某款遊戲查看它的所有未解決問題。')}
+    <section class="issue-filter-panel">
+      <div class="issue-filter-controls">
+        <label class="issue-search-box">
+          <span>遊戲名稱搜尋 / Search game</span>
+          <input class="control" id="issue-search" value="${esc(state.issueSearch)}" placeholder="輸入中文或 English 遊戲名稱…">
+        </label>
+        <label class="issue-select-box">
+          <span>遊戲篩選 / Filter game</span>
+          <select class="control" id="issue-game-filter">
+            <option value="all">全部遊戲 / All games</option>
+            ${gameOptions.map(g=>`<option value="${esc(g.id)}" ${String(state.issueGame)===g.id?'selected':''}>${esc(g.label)}</option>`).join('')}
+          </select>
+        </label>
+        <button class="btn primary" id="issue-search-btn">搜尋 / Search</button>
+        <button class="btn ghost" id="issue-clear-btn">清除 / Clear</button>
+      </div>
+      <div class="issue-filter-summary">
+        <div><small>目前條件 / Filter</small><strong>${currentGame?esc(currentGame.label):(search?`名稱包含「${esc(search)}」`:'全部問題 / All issues')}</strong></div>
+        <div><small>遊戲 / Games</small><strong>${shownGames.toLocaleString()}</strong></div>
+        <div><small>問題 / Issues</small><strong>${rows.length.toLocaleString()}</strong></div>
+      </div>
+    </section>
+    ${currentGame?`<section class="selected-game-issue-summary">
+      <button class="selected-game-identity open-game" data-slug="${esc(currentGame.slug)}">
+        <span class="selected-game-cover native-cover">${gameCoverInner(currentGame)}</span>
+        <span>
+          <small>已選遊戲 / Selected game</small>
+          <strong>${esc(currentGame.zh||currentGame.en)}</strong>
+          <em>${esc(currentGame.en||'')}</em>
+        </span>
+      </button>
+      <div class="selected-issue-metric">
+        <small>問題總數 / Total issues</small>
+        <strong>${selectedProblemCount.toLocaleString()}</strong>
+        <span>目前未解決問題類型</span>
+      </div>
+      <div class="selected-issue-metric selected-issue-top">
+        <small>最常見問題 / Top issue</small>
+        <strong>${selectedTopIssue?esc(selectedTopIssue.title_zh||selectedTopIssue.issue_category):'—'}</strong>
+        <span>${selectedTopIssue?esc(selectedTopIssue.title_en||selectedTopIssue.issue_category):'No issue data'}${selectedTopIssue?` · 24H ${Number(selectedTopIssue.mention_count_24h||0).toLocaleString()}`:''}</span>
+      </div>
+      <div class="selected-issue-metric">
+        <small>24H 提及總量 / Mentions</small>
+        <strong>${selectedMentions24h.toLocaleString()}</strong>
+        <span>所有問題合計</span>
+      </div>
+      <div class="selected-issue-metric">
+        <small>最近更新 / Last update</small>
+        <strong class="selected-update-time">${selectedLatest?fmtDate(selectedLatest,true):'—'}</strong>
+        <span>${selectedLatest?'最後問題活動時間':'尚無更新時間'}</span>
+      </div>
+    </section>`:''}
+    ${currentGame?renderIssueTrendChart(selectedTrend,selectedTrendMessage):''}
+    <div class="issue-list">
+      ${rows.map(x=>`<article class="issue-game-card">
+        <button class="issue-game-preview open-game" data-slug="${esc(x.games?.slug)}" aria-label="預覽 ${esc(x.games?.name_zh_hant||x.games?.name_en)}">
+          <span class="issue-game-cover native-cover">${gameCoverInner(x.games||{})}</span>
+          <span class="issue-game-info">
+            <small class="issue-game-label">遊戲 / Game</small>
+            <strong class="issue-game-name">${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong>
+            <span class="issue-game-en">${esc(x.games?.name_en||'')}</span>
+          </span>
+        </button>
+        <div class="issue-problem">
+          <small>問題 / Issue</small>
+          <strong>${esc(x.title_zh||x.issue_category)}</strong>
+          <span>${esc(x.title_en||x.issue_category)}</span>
+          <span class="badge ${x.official_confirmed?'ok':''}">${esc(x.issue_category)}${x.official_confirmed?' · 官方確認 / Confirmed':' · 追蹤中 / Tracking'}</span>
+        </div>
+        <div class="issue-number">
+          <small>24H 提及 / Mentions</small>
+          <strong>${Number(x.mention_count_24h||0).toLocaleString()}</strong>
+        </div>
+        <div class="issue-number">
+          <small>24H 成長 / Growth</small>
+          <strong>${x.growth_24h!=null?`${Number(x.growth_24h)>0?'+':''}${Number(x.growth_24h)}%`:'—'}</strong>
+        </div>
+        <div class="issue-card-actions">
+          <button class="btn issue-filter-game" data-game-id="${esc(x.game_id)}">只看此遊戲 / Filter</button>
+          <button class="btn primary open-game" data-slug="${esc(x.games?.slug)}">預覽 / Preview</button>
+        </div>
+      </article>`).join('')||'<div class="empty">沒有符合目前搜尋或篩選條件的玩家問題。</div>'}
+    </div>`;
+
+  bindCards();
+
+  const searchInput=document.querySelector('#issue-search');
+  document.querySelector('#issue-search-btn').onclick=()=>{
+    state.issueSearch=searchInput.value.trim();
+    state.issueGame='all';
+    pageIssues();
+  };
+  searchInput.onkeydown=e=>{if(e.key==='Enter')document.querySelector('#issue-search-btn').click();};
+
+  document.querySelector('#issue-game-filter').onchange=e=>{
+    state.issueGame=e.target.value;
+    if(state.issueGame!=='all')state.issueSearch='';
+    pageIssues();
+  };
+
+  document.querySelector('#issue-clear-btn').onclick=()=>{
+    state.issueSearch='';
+    state.issueGame='all';
+    pageIssues();
+  };
+
+  document.querySelectorAll('.issue-filter-game').forEach(b=>b.onclick=()=>{
+    state.issueGame=b.dataset.gameId;
+    state.issueSearch='';
+    pageIssues();
+  });
+}
+async function pageLive(){const {data,error}=await supabase.from('streaming_snapshots').select('*,games!inner(slug,name_en,name_zh_hant)').order('captured_at',{ascending:false}).limit(1000);if(error)throw error;const latest=new Map();for(const x of data||[]){const k=`${x.game_id}:${x.source}`;if(!latest.has(k))latest.set(k,x)}const combined=new Map();for(const x of latest.values()){const k=String(x.game_id),cur=combined.get(k)||{game:x.games,viewers:0,channels:0,sources:[]};cur.viewers+=Number(x.viewer_count);cur.channels+=Number(x.channel_count);cur.sources.push(x.source);combined.set(k,cur)}const rows=[...combined.values()].sort((a,b)=>b.viewers-a.viewers);pageEl().innerHTML=`${header('直播熱度 / Live Trends','Twitch + YouTube 分開採集，排行榜顯示合計觀看與頻道數。')}<div class="panel">${rows.map((x,i)=>`<div class="rank-row"><span class="rank">${String(i+1).padStart(2,'0')}</span><div><b>${esc(x.game?.name_zh_hant||x.game?.name_en)}</b><div class="sub">${esc(x.sources.join(' + '))}</div></div><b>${x.viewers.toLocaleString()}</b><span>${x.channels.toLocaleString()} 頻道</span></div>`).join('')||'<div class="empty">尚未取得直播快照；接通 Twitch / YouTube 同步後會自動累積。</div>'}</div>`;}
+
+async function pageChanges(){const {data,error}=await supabase.from('change_events').select('*,games(name_zh_hant,name_en,slug)').order('detected_at',{ascending:false}).limit(300);if(error)throw error;pageEl().innerHTML=`${header('重大變化 / Changes','只記錄達到門檻的上市、價格、評價、問題與直播事件。')}<div class="panel">${(data||[]).map(x=>`<div class="timeline-row" style="grid-template-columns:120px minmax(220px,1fr) 1fr"><div><span class="badge ${x.severity==='critical'?'danger':x.severity==='high'?'warn':''}">${esc(eventZh(x.event_type))}</span><div class="sub" style="margin-top:5px">${fmtDate(x.detected_at,true)}</div></div><div><b>${esc(x.games?.name_zh_hant||x.games?.name_en||'系統事件')}</b><div class="sub">${esc(x.games?.name_en||'')}</div></div><code class="sub">${esc(JSON.stringify(x.new_value||{}))}</code></div>`).join('')||'<div class="empty">目前沒有重大變化。</div>'}</div>`;}
+
+async function pageWatchlist(){const uid=state.session.user.id;const {data,error}=await supabase.from('watchlist').select('*,games!inner(slug,name_en,name_zh_hant,release_date)').eq('user_id',uid).order('created_at',{ascending:false});if(error)throw error;pageEl().innerHTML=`${header('我的收藏 / Watchlist','收藏遊戲與個人通知條件。')}<div class="panel">${(data||[]).map(x=>`<div class="price-row" style="grid-template-columns:minmax(220px,1fr) 120px 1fr 80px"><div><b>${esc(x.games?.name_zh_hant||x.games?.name_en)}</b><div class="sub">${esc(x.games?.name_en)} · ${fmtDate(x.games?.release_date)}</div></div><span>目標 ${x.target_price!=null?money(x.target_price):'未設定'}</span><span class="sub">${[['上市',x.notify_release],['預購',x.notify_preorder],['價格',x.notify_price],['評價',x.notify_reviews],['問題',x.notify_issues],['直播',x.notify_streams]].filter(y=>y[1]).map(y=>y[0]).join(' · ')||'未開通知'}</span><button class="btn danger remove-watch" data-id="${x.id}">移除</button></div>`).join('')||'<div class="empty">尚未收藏遊戲。可在遊戲詳細頁加入收藏。</div>'}</div>`;document.querySelectorAll('.remove-watch').forEach(b=>b.onclick=async()=>{const {error}=await supabase.from('watchlist').delete().eq('id',b.dataset.id);if(error)toast(error.message,true);else{toast('已移除收藏');pageWatchlist();}});}
+
+async function pageSettings(){const [{data:health},{data:runs},{data:allowed}]=await Promise.all([supabase.from('source_health').select('*').order('source_name'),supabase.from('sync_runs').select('*').order('started_at',{ascending:false}).limit(15),supabase.from('allowed_users').select('email')]);pageEl().innerHTML=`${header('設定 / Settings','帳號、資料來源與同步健康度。')}<section class="two-col"><div class="panel"><div class="section-head"><div><h2>帳號</h2><p>Supabase Auth</p></div></div><div class="signal-row"><span>Email</span><b>${esc(state.session.user.email)}</b></div><div class="signal-row"><span>私人白名單</span><span class="badge ok">${allowed?.length?'已授權':'未授權'}</span></div><button class="btn danger" id="settings-logout" style="margin-top:12px">登出</button></div><div class="panel"><div class="section-head"><div><h2>資料來源健康度</h2><p>只顯示後端紀錄，不暴露 API 金鑰</p></div></div>${(health||[]).map(x=>`<div class="signal-row"><div><b>${esc(x.source_name)}</b><div class="sub">${esc(x.message||'—')}</div></div><span class="badge ${x.status==='ok'?'ok':x.status==='credential_required'?'warn':'danger'}">${esc(x.status)}</span></div>`).join('')||'<div class="empty">尚無健康度紀錄</div>'}</div></section><section class="section panel"><div class="section-head"><div><h2>最近同步</h2><p>最多 15 筆</p></div></div>${(runs||[]).map(x=>`<div class="timeline-row" style="grid-template-columns:100px 90px 1fr 150px"><b>${esc(x.source_name)}</b><span class="badge ${x.status==='ok'?'ok':x.status==='running'?'':'danger'}">${esc(x.status)}</span><span>${Number(x.items_seen).toLocaleString()} seen · ${Number(x.items_changed).toLocaleString()} changed</span><span class="sub">${fmtDate(x.started_at,true)}</span></div>`).join('')||'<div class="empty">尚無同步紀錄</div>'}</section>`;document.querySelector('#settings-logout').onclick=()=>supabase.auth.signOut();}
+
+async function pageGame(slug){if(!slug){location.hash='games';return;}const {data:g,error}=await supabase.from('games').select('*').eq('slug',slug).single();if(error)throw error;const [pl,pr,rv,is,st,li,wl]=await Promise.all([supabase.from('game_platforms').select('*').eq('game_id',g.id),supabase.from('store_products').select('*').eq('game_id',g.id).eq('region','TW').order('current_price'),supabase.from('review_snapshots').select('*').eq('game_id',g.id).order('captured_at',{ascending:false}).limit(20),supabase.from('game_issues').select('*').eq('game_id',g.id).eq('resolved',false).order('mention_count_24h',{ascending:false}),supabase.from('streaming_snapshots').select('*').eq('game_id',g.id).order('captured_at',{ascending:false}).limit(30),supabase.from('official_links').select('*').eq('game_id',g.id),supabase.from('watchlist').select('*').eq('user_id',state.session.user.id).eq('game_id',g.id).maybeSingle()]);const latestR=rv.data?.[0],latestS=st.data?.[0],watch=wl.data;
+  pageEl().innerHTML=`${header('遊戲情報 / Game Detail','平台、價格、評價、問題、直播與官方連結集中顯示。')}<section class="detail-hero"><div class="detail-cover">${esc(initials(g.name_en))}</div><div><span class="badge ${statusClass(g.release_status)}">${statusZh(g.release_status)}</span><h2>${esc(g.name_zh_hant||g.name_en)}</h2><p>${esc(g.name_en)} · ${esc(g.developer||'Developer 待同步')} · ${esc(g.publisher||'Publisher 待同步')}</p>${Array.isArray(g.gameplay_tags)&&g.gameplay_tags.length?`<div class="game-detail-gameplay"><small>玩法分類 / Gameplay</small><div class="gameplay-row">${renderGameplayTags(g,12)}</div></div>`:''}<div class="tags" style="margin-top:10px">${(g.genres||[]).map(x=>`<span class="tag">${esc(x)}</span>`).join('')}<span class="tag">Release ${fmtDate(g.release_date)}</span></div></div>${g.official_website_url?`<button class="btn primary" id="official-site">官方網站 ↗</button>`:''}</section><section class="metrics"><article class="metric"><span>玩家評價</span><strong>${latestR?.positive_percentage!=null?`${Number(latestR.positive_percentage)}%`:'—'}</strong><small>${esc(latestR?.source||'待同步')}</small></article><article class="metric"><span>直播觀看</span><strong>${latestS?Number(latestS.viewer_count).toLocaleString():'—'}</strong><small>${latestS?`${esc(latestS.source)} · ${Number(latestS.channel_count)} 頻道`:'待同步'}</small></article><article class="metric"><span>未解決問題</span><strong>${is.data?.length||0}</strong><small>Issues</small></article><article class="metric"><span>官方連結</span><strong>${li.data?.length||0}</strong><small>Verified</small></article></section><div class="detail-grid"><div class="panel"><div class="section-head"><div><h2>平台與價格</h2><p>TW / NTD</p></div></div>${(pr.data||[]).map(x=>`<div class="price-row" style="grid-template-columns:1fr 110px 45px"><div><b>${esc(x.store)}</b><div class="sub">${esc(x.platform)} · ${esc(x.edition)}</div></div><b>${money(x.current_price,x.currency)} ${Number(x.discount_percent)>0?`<span class="badge ok">-${Number(x.discount_percent)}%</span>`:''}</b><button class="btn" data-url="${esc(x.store_url)}">↗</button></div>`).join('')||'<div class="empty">價格待同步</div>'}</div><div class="panel"><div class="section-head"><div><h2>平台支援</h2><p>語言與上市狀態</p></div></div>${(pl.data||[]).map(x=>`<div class="signal-row"><div><b>${esc(x.platform)}</b><div class="sub">${fmtDate(x.release_date)}</div></div><span>${x.supports_zh_hant?'繁中 · ':''}${esc(x.availability)}</span></div>`).join('')||'<div class="empty">平台待同步</div>'}</div><div class="panel"><div class="section-head"><div><h2>玩家主要問題</h2><p>目前未解決</p></div></div>${(is.data||[]).map(x=>`<div class="issue-row" style="grid-template-columns:1fr 80px"><div><b>${esc(x.title_zh)}</b><div class="sub">${esc(x.title_en)} · 24H ${Number(x.mention_count_24h)}</div></div><b>${x.growth_24h!=null?`${Number(x.growth_24h)>0?'+':''}${Number(x.growth_24h)}%`:'—'}</b></div>`).join('')||'<div class="empty">目前沒有達門檻的玩家問題</div>'}</div><div class="panel"><div class="section-head"><div><h2>官方連結</h2><p>Official / Verified</p></div></div>${(li.data||[]).map(x=>`<div class="signal-row"><div><b>${esc(x.label)}</b><div class="sub">${esc(x.region||'GLOBAL')} · ${esc(x.tier)}</div></div><button class="btn" data-url="${esc(x.url)}">開啟 ↗</button></div>`).join('')||'<div class="empty">尚無官方連結</div>'}</div></div><section class="section panel"><div class="section-head"><div><h2>我的收藏通知</h2><p>只有你的帳號可存取</p></div><button class="btn ${watch?'danger':'primary'}" id="watch-btn">${watch?'移除收藏':'加入收藏'}</button></div>${watch?`<div class="toolbar"><label class="sub">目標價 <input class="control" id="target-price" type="number" min="0" step="1" value="${watch.target_price??''}" placeholder="例如 1200"></label></div><div class="toolbar">${[['notify_release','上市'],['notify_preorder','預購'],['notify_price','價格'],['notify_reviews','評價'],['notify_issues','問題'],['notify_streams','直播']].map(([k,l])=>`<button class="btn notify-toggle ${watch[k]?'primary':''}" data-key="${k}">${l}</button>`).join('')}<button class="btn primary" id="save-watch">儲存設定</button></div>`:''}</section>`;
+  if(g.official_website_url)document.querySelector('#official-site').onclick=()=>window.open(g.official_website_url,'_blank','noopener,noreferrer');document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));
+  document.querySelector('#watch-btn').onclick=async()=>{if(watch){const {error}=await supabase.from('watchlist').delete().eq('id',watch.id);if(error)toast(error.message,true);else{toast('已移除收藏');pageGame(slug)}}else{const {error}=await supabase.from('watchlist').insert({user_id:state.session.user.id,game_id:g.id});if(error)toast(error.message,true);else{toast('已加入收藏');pageGame(slug)}}};
+  if(watch){document.querySelectorAll('.notify-toggle').forEach(b=>b.onclick=()=>b.classList.toggle('primary'));document.querySelector('#save-watch').onclick=async()=>{const payload={target_price:document.querySelector('#target-price').value?Number(document.querySelector('#target-price').value):null};document.querySelectorAll('.notify-toggle').forEach(b=>payload[b.dataset.key]=b.classList.contains('primary'));const {error}=await supabase.from('watchlist').update(payload).eq('id',watch.id);if(error)toast(error.message,true);else toast('收藏通知設定已更新');};}
+}
+
+init();
++Math.round(v).toLocaleString();
+    return Math.round(v).toLocaleString();
+  };
+  const formatDate=v=>new Intl.DateTimeFormat('zh-TW',{month:'2-digit',day:'2-digit'}).format(new Date(v));
+  const formatDateTime=v=>new Intl.DateTimeFormat('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(v));
+
+  const grid=[0,.25,.5,.75,1].map(r=>{
+    const gy=top+innerH-innerH*r;
+    const val=yMin+(yMax-yMin)*r;
+    return `<line x1="${left}" y1="${gy}" x2="${width-right}" y2="${gy}" class="price-chart-grid"/><text x="${left-8}" y="${gy+3}" text-anchor="end" class="price-chart-axis">${esc(formatAxisPrice(val))}</text>`;
+  }).join('');
+
+  const tickIndexes=[0,Math.floor((points.length-1)/2),points.length-1].filter((v,i,a)=>a.indexOf(v)===i);
+  const labels=tickIndexes.map(i=>`<text x="${x(i)}" y="${height-13}" text-anchor="middle" class="price-chart-axis">${esc(formatDate(points[i].at))}</text>`).join('');
+
+  const lowPoint=points[lowIndex];
+  const currentPoint=points[actualCurrentIndex];
+  const samePoint=lowIndex===actualCurrentIndex&&Number(lowPoint.price)===Number(currentPoint.price);
+
+  const pointDots=points.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p.price)}" r="2.5" class="price-chart-dot"/>`).join('');
+  const lowMarker=`<line x1="${x(lowIndex)}" y1="${top}" x2="${x(lowIndex)}" y2="${top+innerH}" class="price-chart-low-line"/><circle cx="${x(lowIndex)}" cy="${y(lowPoint.price)}" r="5.5" class="price-chart-low"/><text x="${Math.max(left+75,Math.min(width-right-75,x(lowIndex)))}" y="${Math.max(15,y(lowPoint.price)-12)}" text-anchor="middle" class="price-chart-low-label">${samePoint?'目前＝歷史低 / Current = Low':'歷史最低 / Historical Low'} · ${esc(formatAxisPrice(lowPoint.price))}</text>`;
+  const currentMarker=samePoint?'':`<line x1="${x(actualCurrentIndex)}" y1="${top}" x2="${x(actualCurrentIndex)}" y2="${top+innerH}" class="price-chart-current-line"/><circle cx="${x(actualCurrentIndex)}" cy="${y(currentPoint.price)}" r="5.5" class="price-chart-current"/><text x="${Math.max(left+70,Math.min(width-right-70,x(actualCurrentIndex)))}" y="${Math.min(top+innerH-8,y(currentPoint.price)+20)}" text-anchor="middle" class="price-chart-current-label">目前 / Current · ${esc(formatAxisPrice(currentPoint.price))}</text>`;
+
+  const note=points.length===1
+    ? '<div class="price-chart-note">目前只有 1 筆價格快照，歷史資料仍在累積 / Only one snapshot; history is still accumulating.</div>'
+    : `<div class="price-chart-note">共 ${points.length.toLocaleString()} 個價格時間點 · 歷史最低 ${esc(formatAxisPrice(low))}（${esc(formatDateTime(lowPoint.at))}）</div>`;
+
+  return `<section class="price-history-chart-panel">
+    <div class="section-head price-history-chart-head">
+      <div><h2>價格歷史趨勢 / Price History</h2><p>依資料庫實際價格快照繪製，不補估計資料。</p></div>
+      <div class="price-chart-legend"><span class="low">● 歷史最低</span><span class="current">● 目前價格</span></div>
+    </div>
+    <div class="price-chart-wrap">
+      <svg class="price-history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="價格歷史趨勢，歷史最低 ${esc(formatAxisPrice(low))}，目前價格 ${esc(formatAxisPrice(currentPoint.price))}">
+        ${grid}
+        ${points.length>1?`<polyline points="${poly}" class="price-chart-line"/>`:''}
+        ${pointDots}
+        ${lowMarker}
+        ${currentMarker}
+        ${labels}
+      </svg>
+    </div>
+    ${note}
+  </section>`;
+}
+
 async function showPricePreview(productId){
   if(!productId)return;
   closeGamePreview();
