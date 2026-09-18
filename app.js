@@ -1,12 +1,49 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
-
 const SUPABASE_URL = 'https://ehyivgyprxiyhldxrzpx.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tukBY1endjNBJdVFoSBHbA__pHOPGGx';
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
-});
+let supabase = null;
 
 const app = document.querySelector('#app');
+
+function bootMessage(title,detail='',error=false){
+  if(!app)return;
+  app.innerHTML=`<div class="boot boot-diagnostic ${error?'error':''}">
+    <strong>${esc(title)}</strong>
+    ${detail?`<span>${esc(detail)}</span>`:''}
+    ${error?'<button class="btn primary" id="boot-retry" type="button">重新載入 / Retry</button>':''}
+  </div>`;
+  document.querySelector('#boot-retry')?.addEventListener('click',()=>location.reload());
+}
+
+async function loadSupabaseSdk(){
+  const sources=[
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/+esm',
+    'https://esm.sh/@supabase/supabase-js@2.57.4',
+    'https://esm.run/@supabase/supabase-js@2.57.4'
+  ];
+  let lastError=null;
+  for(const url of sources){
+    try{
+      bootMessage('Loading Game Intelligence Monitor…',`載入核心元件 / Loading SDK: ${new URL(url).hostname}`);
+      const mod=await Promise.race([
+        import(url),
+        new Promise((_,reject)=>setTimeout(()=>reject(new Error('SDK load timeout')),7000))
+      ]);
+      if(typeof mod?.createClient==='function')return mod.createClient;
+      throw new Error('createClient not found');
+    }catch(err){
+      lastError=err;
+      console.warn('[Game Intel] Supabase SDK source failed',url,err);
+    }
+  }
+  throw lastError||new Error('Supabase SDK unavailable');
+}
+
+function withTimeout(promise,ms,label){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error(`${label} timeout after ${Math.round(ms/1000)}s`)),ms))
+  ]);
+}
 const state = { session:null, allowed:false, lang:localStorage.getItem('game-intel-lang') || 'zh', search:'', page:0, pageSize:36, gameFilter:'released', releaseFilter:localStorage.getItem('game-intel-release-filter') || 'unreleased', releasePage:0, issueSearch:'', issueGame:'all', gameplayFilters:(()=>{const multi=localStorage.getItem('game-intel-gameplay-filters');if(multi){try{const v=JSON.parse(multi);if(Array.isArray(v))return v.filter(Boolean);}catch{}}const legacy=localStorage.getItem('game-intel-gameplay-filter');return legacy&&legacy!=='all'?[legacy]:[];})() };
 const fmtDate = (v, withTime=false) => v ? new Intl.DateTimeFormat('zh-TW', withTime ? {dateStyle:'medium',timeStyle:'short'} : {year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(v)) : 'TBA';
 const money = (v, c='TWD') => v == null ? '—' : Number(v) === 0 ? '免費' : c === 'TWD' ? `NT$${Number(v).toLocaleString()}` : `${c} ${Number(v).toLocaleString()}`;
@@ -209,11 +246,40 @@ function toast(msg, error=false){
 }
 
 async function init(){
-  const {data:{session}}=await supabase.auth.getSession();
-  state.session=session;
-  if(session) state.allowed=await checkAllowed();
-  supabase.auth.onAuthStateChange(async (_event,session)=>{state.session=session;state.allowed=session?await checkAllowed():false;render();});
-  render();
+  try{
+    const createClient=await loadSupabaseSdk();
+    supabase=createClient(SUPABASE_URL,SUPABASE_KEY,{
+      auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+    });
+
+    bootMessage('Loading Game Intelligence Monitor…','正在確認登入狀態 / Checking session…');
+    const sessionResult=await withTimeout(supabase.auth.getSession(),8000,'Auth session');
+    const session=sessionResult?.data?.session||null;
+    state.session=session;
+
+    if(session){
+      bootMessage('Loading Game Intelligence Monitor…','正在驗證私人存取權限 / Checking access…');
+      state.allowed=await withTimeout(checkAllowed(),8000,'Access check');
+    }
+
+    supabase.auth.onAuthStateChange((_event,nextSession)=>{
+      setTimeout(async()=>{
+        try{
+          state.session=nextSession;
+          state.allowed=nextSession?await withTimeout(checkAllowed(),8000,'Access check'):false;
+          render();
+        }catch(err){
+          console.error('[Game Intel] auth state render failed',err);
+          bootMessage('登入狀態更新失敗 / Auth update failed',err?.message||String(err),true);
+        }
+      },0);
+    });
+
+    render();
+  }catch(err){
+    console.error('[Game Intel] boot failed',err);
+    bootMessage('網站啟動失敗 / Startup failed',err?.message||String(err),true);
+  }
 }
 async function checkAllowed(){
   const {data,error}=await supabase.from('allowed_users').select('email').limit(1);
