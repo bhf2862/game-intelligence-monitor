@@ -206,11 +206,28 @@ async function hydrateGames(games){
   return games.map(g=>{const gid=String(g.id);const products=(pr.data||[]).filter(x=>String(x.game_id)===gid).sort((a,b)=>(a.current_price??1e15)-(b.current_price??1e15));return{...g,platforms:(pl.data||[]).filter(x=>String(x.game_id)===gid),price:products[0]||null,review:(rv.data||[]).find(x=>String(x.game_id)===gid)||null,issue:(is.data||[]).find(x=>String(x.game_id)===gid)||null,live:(st.data||[]).find(x=>String(x.game_id)===gid)||null};});
 }
 
+function steamAppIdFromGame(g){
+  const slug=String(g?.slug||'');
+  const m=slug.match(/^steam-(\d+)$/);
+  return m?m[1]:null;
+}
+function coverCandidates(g){
+  const urls=[];
+  if(g?.cover_url)urls.push(String(g.cover_url));
+  const appid=steamAppIdFromGame(g);
+  if(appid){
+    urls.push(`https://cdn.akamai.steamstatic.com/steam/apps/${appid}/header.jpg`);
+    urls.push(`https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/header.jpg`);
+  }
+  return [...new Set(urls)];
+}
 function gameCoverInner(g){
   const title=g?.name_zh_hant||g?.name_en||'Game';
   const fallback=esc(initials(g?.name_en||title));
-  const src=g?.cover_url?esc(g.cover_url):'';
-  return `${src?`<img class="native-cover-img" data-cover-img src="${src}" alt="${esc(title)}" loading="lazy" decoding="async">`:''}<span class="cover-fallback">${fallback}</span>`;
+  const candidates=coverCandidates(g);
+  const first=candidates[0]?esc(candidates[0]):'';
+  const encoded=esc(JSON.stringify(candidates));
+  return `${first?`<img class="native-cover-img" data-cover-img data-cover-candidates='${encoded}' data-cover-index="0" src="${first}" alt="${esc(title)}" loading="lazy" decoding="async" referrerpolicy="no-referrer">`:''}<span class="cover-fallback">${fallback}</span>`;
 }
 function closeGamePreview(){
   document.querySelector('.game-preview-backdrop')?.remove();
@@ -277,11 +294,28 @@ function bindCoverImages(root=document){
   root.querySelectorAll('[data-cover-img]').forEach(img=>{
     if(img.dataset.bound==='1')return;
     img.dataset.bound='1';
-    img.addEventListener('load',()=>img.parentElement?.classList.add('has-native-image'));
-    img.addEventListener('error',()=>{img.remove();});
-    if(img.complete&&img.naturalWidth>0)img.parentElement?.classList.add('has-native-image');
+    const parent=img.parentElement;
+    const candidates=(()=>{
+      try{return JSON.parse(img.dataset.coverCandidates||'[]');}
+      catch{return [];}
+    })();
+    const markLoaded=()=>parent?.classList.add('has-native-image');
+    img.addEventListener('load',markLoaded);
+    img.addEventListener('error',()=>{
+      parent?.classList.remove('has-native-image');
+      const current=Number(img.dataset.coverIndex||0);
+      const next=current+1;
+      if(next<candidates.length){
+        img.dataset.coverIndex=String(next);
+        img.src=candidates[next];
+      }else{
+        img.remove();
+      }
+    });
+    if(img.complete&&img.naturalWidth>0)markLoaded();
   });
 }
+
 function gameCard(g){const releaseText=g.release_date?fmtDate(g.release_date):'日期待定 / TBA';return `<article class="game-card" data-game="${esc(g.slug)}"><div class="cover native-cover">${gameCoverInner(g)}</div><span class="badge ${statusClass(g.release_status)}">${esc(statusZh(g.release_status))}</span><h3>${esc(g.name_zh_hant||g.name_en)}</h3><div class="en">${esc(g.name_en)}</div><div class="card-release-row"><span class="card-release-icon">📅</span><span class="card-release-label">上市 / Release</span><strong class="card-release-date ${g.release_date?'':'tba'}">${esc(releaseText)}</strong></div><div class="tags">${(g.platforms||[]).slice(0,4).map(p=>`<span class="tag">${esc(p.platform)}</span>`).join('')||'<span class="tag">平台待同步</span>'}</div><div class="game-stats"><div><small>最低價</small><b>${g.price?money(g.price.current_price,g.price.currency):'—'}</b></div><div><small>評價</small><b>${g.review?.positive_percentage!=null?`${Number(g.review.positive_percentage)}%`:'—'}</b></div><div><small>Live</small><b>${g.live?Number(g.live.viewer_count).toLocaleString():'—'}</b></div></div><div class="card-actions"><button class="btn primary open-game" data-slug="${esc(g.slug)}">預覽 / Preview</button>${g.official_website_url?`<button class="btn official" data-url="${esc(g.official_website_url)}">官方 ↗</button>`:''}</div></article>`;}
 function bindCards(){document.querySelectorAll('.open-game').forEach(b=>{if(b.dataset.previewBound==='1')return;b.dataset.previewBound='1';b.onclick=e=>{e.stopPropagation();showGamePreview(b.dataset.slug);};});document.querySelectorAll('.official').forEach(b=>b.onclick=e=>{e.stopPropagation();window.open(b.dataset.url,'_blank','noopener,noreferrer')});bindCoverImages();}
 
