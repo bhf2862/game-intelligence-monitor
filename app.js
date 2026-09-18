@@ -44,6 +44,12 @@ function withTimeout(promise,ms,label){
     new Promise((_,reject)=>setTimeout(()=>reject(new Error(`${label} timeout after ${Math.round(ms/1000)}s`)),ms))
   ]);
 }
+const FILTER_RECOVERY_KEY='game-intel-filter-recovery-20260918';
+if(!localStorage.getItem(FILTER_RECOVERY_KEY)){
+  localStorage.removeItem('game-intel-gameplay-filters');
+  localStorage.removeItem('game-intel-gameplay-filter');
+  localStorage.setItem(FILTER_RECOVERY_KEY,'1');
+}
 const state = { session:null, allowed:false, lang:localStorage.getItem('game-intel-lang') || 'zh', search:'', page:0, pageSize:36, gameFilter:'released', releaseFilter:localStorage.getItem('game-intel-release-filter') || 'unreleased', releasePage:0, issueSearch:'', issueGame:'all', gameplayFilters:(()=>{const multi=localStorage.getItem('game-intel-gameplay-filters');if(multi){try{const v=JSON.parse(multi);if(Array.isArray(v))return v.filter(Boolean);}catch{}}const legacy=localStorage.getItem('game-intel-gameplay-filter');return legacy&&legacy!=='all'?[legacy]:[];})() };
 const fmtDate = (v, withTime=false) => v ? new Intl.DateTimeFormat('zh-TW', withTime ? {dateStyle:'medium',timeStyle:'short'} : {year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(v)) : 'TBA';
 const money = (v, c='TWD') => v == null ? '—' : Number(v) === 0 ? '免費' : c === 'TWD' ? `NT$${Number(v).toLocaleString()}` : `${c} ${Number(v).toLocaleString()}`;
@@ -270,6 +276,13 @@ async function init(){
 
       bootMessage('Loading Game Intelligence Monitor…','正在驗證私人存取權限 / Checking access…');
       state.allowed=await withTimeout(checkAllowed(),12000,'Access check');
+      if(state.allowed){
+        bootMessage('Loading Game Intelligence Monitor…','正在連接遊戲資料 / Connecting game database…');
+        const dataReady=await withTimeout(ensureDataSession(),12000,'Data session');
+        if(!dataReady){
+          throw new Error('已通過帳號授權，但遊戲資料連線沒有取得登入權限。請重新登入一次。');
+        }
+      }
     }
 
     supabase.auth.onAuthStateChange((_event,nextSession)=>{
@@ -277,6 +290,10 @@ async function init(){
         try{
           state.session=nextSession;
           state.allowed=nextSession?await withTimeout(checkAllowed(),8000,'Access check'):false;
+          if(state.allowed){
+            const dataReady=await withTimeout(ensureDataSession(),10000,'Data session');
+            if(!dataReady)throw new Error('遊戲資料登入狀態尚未建立 / Data session unavailable');
+          }
           render();
         }catch(err){
           console.error('[Game Intel] auth state render failed',err);
@@ -341,6 +358,34 @@ async function checkAllowed(){
     console.warn('[Game Intel] session refresh failed',err);
   }
 
+  return false;
+}
+
+async function ensureDataSession(){
+  const test=async()=>{
+    const {count,error}=await supabase.from('games').select('id',{count:'exact',head:true});
+    return {count:Number(count||0),error};
+  };
+
+  let probe=await test();
+  if(!probe.error&&probe.count>0)return true;
+
+  console.warn('[Game Intel] data session probe failed or returned zero',probe);
+
+  const session=state.session;
+  if(session?.access_token&&session?.refresh_token){
+    const {data,error}=await supabase.auth.setSession({
+      access_token:session.access_token,
+      refresh_token:session.refresh_token
+    });
+    if(error)console.warn('[Game Intel] setSession failed',error);
+    if(data?.session)state.session=data.session;
+  }
+
+  probe=await test();
+  if(!probe.error&&probe.count>0)return true;
+
+  console.error('[Game Intel] data access still unavailable',probe);
   return false;
 }
 
