@@ -45,16 +45,30 @@ async function loadGameFilterCounts(){
   const now=new Date().toISOString();
   const queries={
     all:supabase.from('games').select('id',{count:'exact',head:true}),
-    upcoming:supabase.from('games').select('id',{count:'exact',head:true}).gte('release_date',now).neq('release_status','released').neq('release_status','cancelled'),
     released:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','released'),
+    cancelled:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','cancelled'),
     preorder:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','preorder'),
-    announced:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','announced'),
-    early_access:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','early_access'),
     delayed:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','delayed'),
-    tba:supabase.from('games').select('id',{count:'exact',head:true}).is('release_date',null),
-    cancelled:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','cancelled')
+    early_access:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','early_access'),
+    upcoming:supabase.from('games').select('id',{count:'exact',head:true})
+      .gte('release_date',now)
+      .neq('release_status','preorder')
+      .neq('release_status','delayed')
+      .neq('release_status','early_access')
+      .neq('release_status','released')
+      .neq('release_status','cancelled'),
+    announced:supabase.from('games').select('id',{count:'exact',head:true})
+      .eq('release_status','announced')
+      .or(`release_date.is.null,release_date.lt.${now}`),
+    tba:supabase.from('games').select('id',{count:'exact',head:true})
+      .eq('release_status','unknown')
+      .or(`release_date.is.null,release_date.lt.${now}`)
   };
-  const entries=await Promise.all(Object.entries(queries).map(async([id,p])=>{const r=await p;return[id,r.count||0]}));
+  const entries=await Promise.all(Object.entries(queries).map(async([id,p])=>{
+    const r=await p;
+    if(r.error) throw r.error;
+    return[id,r.count||0];
+  }));
   return Object.fromEntries(entries);
 }
 function renderGameFilterTabs(counts){
@@ -64,22 +78,29 @@ function renderGameFilterTabs(counts){
 
 const releaseFilters=[
   {id:'unreleased',icon:'◷',zh:'全部未上市',en:'All Unreleased'},
-  {id:'upcoming',icon:'📅',zh:'即將上市',en:'Upcoming'},
   {id:'preorder',icon:'🛒',zh:'預購中',en:'Pre-order'},
-  {id:'announced',icon:'📣',zh:'已公布',en:'Announced'},
-  {id:'early_access',icon:'⚡',zh:'搶先體驗',en:'Early Access'},
   {id:'delayed',icon:'⏳',zh:'延期',en:'Delayed'},
+  {id:'early_access',icon:'⚡',zh:'搶先體驗',en:'Early Access'},
+  {id:'upcoming',icon:'📅',zh:'即將上市',en:'Upcoming'},
+  {id:'announced',icon:'📣',zh:'已公布',en:'Announced'},
   {id:'tba',icon:'?',zh:'日期待定',en:'TBA'}
 ];
 const releaseFilterInfo=id=>releaseFilters.find(x=>x.id===id)||releaseFilters[0];
 function applyReleaseFilter(q,id){
   const now=new Date().toISOString();
-  if(id==='upcoming') return q.gte('release_date',now).neq('release_status','released').neq('release_status','cancelled');
   if(id==='preorder') return q.eq('release_status','preorder');
-  if(id==='announced') return q.eq('release_status','announced');
-  if(id==='early_access') return q.eq('release_status','early_access');
   if(id==='delayed') return q.eq('release_status','delayed');
-  if(id==='tba') return q.is('release_date',null).neq('release_status','released').neq('release_status','cancelled');
+  if(id==='early_access') return q.eq('release_status','early_access');
+  if(id==='upcoming') return q.gte('release_date',now)
+    .neq('release_status','preorder')
+    .neq('release_status','delayed')
+    .neq('release_status','early_access')
+    .neq('release_status','released')
+    .neq('release_status','cancelled');
+  if(id==='announced') return q.eq('release_status','announced')
+    .or(`release_date.is.null,release_date.lt.${now}`);
+  if(id==='tba') return q.eq('release_status','unknown')
+    .or(`release_date.is.null,release_date.lt.${now}`);
   return q.neq('release_status','released').neq('release_status','cancelled');
 }
 function applyReleaseSort(q,id){
@@ -89,15 +110,33 @@ function applyReleaseSort(q,id){
 async function loadReleaseCounts(){
   const now=new Date().toISOString();
   const queries={
-    unreleased:supabase.from('games').select('id',{count:'exact',head:true}).neq('release_status','released').neq('release_status','cancelled'),
-    upcoming:supabase.from('games').select('id',{count:'exact',head:true}).gte('release_date',now).neq('release_status','released').neq('release_status','cancelled'),
-    preorder:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','preorder'),
-    announced:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','announced'),
-    early_access:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','early_access'),
-    delayed:supabase.from('games').select('id',{count:'exact',head:true}).eq('release_status','delayed'),
-    tba:supabase.from('games').select('id',{count:'exact',head:true}).is('release_date',null).neq('release_status','released').neq('release_status','cancelled')
+    unreleased:supabase.from('games').select('id',{count:'exact',head:true})
+      .neq('release_status','released').neq('release_status','cancelled'),
+    preorder:supabase.from('games').select('id',{count:'exact',head:true})
+      .eq('release_status','preorder'),
+    delayed:supabase.from('games').select('id',{count:'exact',head:true})
+      .eq('release_status','delayed'),
+    early_access:supabase.from('games').select('id',{count:'exact',head:true})
+      .eq('release_status','early_access'),
+    upcoming:supabase.from('games').select('id',{count:'exact',head:true})
+      .gte('release_date',now)
+      .neq('release_status','preorder')
+      .neq('release_status','delayed')
+      .neq('release_status','early_access')
+      .neq('release_status','released')
+      .neq('release_status','cancelled'),
+    announced:supabase.from('games').select('id',{count:'exact',head:true})
+      .eq('release_status','announced')
+      .or(`release_date.is.null,release_date.lt.${now}`),
+    tba:supabase.from('games').select('id',{count:'exact',head:true})
+      .eq('release_status','unknown')
+      .or(`release_date.is.null,release_date.lt.${now}`)
   };
-  const entries=await Promise.all(Object.entries(queries).map(async([id,p])=>{const r=await p;return[id,r.count||0]}));
+  const entries=await Promise.all(Object.entries(queries).map(async([id,p])=>{
+    const r=await p;
+    if(r.error) throw r.error;
+    return[id,r.count||0];
+  }));
   return Object.fromEntries(entries);
 }
 function renderReleaseFilterTabs(counts){
@@ -319,7 +358,7 @@ async function pageCalendar(){
   const games=await hydrateGames(data||[]);
   const pages=Math.max(1,Math.ceil((count||0)/state.pageSize));
   const active=releaseFilterInfo(state.releaseFilter);
-  pageEl().innerHTML=`${header('上市情報 / Upcoming & Announced','所有尚未正式上市的遊戲集中在這裡：即將上市、預購、已公布、搶先體驗、延期與日期待定。')}${renderReleaseFilterTabs(counts)}<div class="game-filter-summary"><div><span>目前分類 / Category</span><strong>${active.icon} ${active.zh} / ${active.en}</strong></div><div><span>符合條件 / Results</span><strong>${(count||0).toLocaleString()} 款</strong></div><div><span>目前頁數 / Page</span><strong>${state.releasePage+1} / ${pages}</strong></div></div><div class="toolbar"><input class="control" id="release-search" value="${esc(state.search)}" placeholder="在「${active.zh}」中搜尋…"><button class="btn" id="release-search-btn">搜尋 / Search</button>${state.search?'<button class="btn ghost" id="release-clear-search">清除 / Clear</button>':''}<button class="btn ghost" id="open-released-games">已上市遊戲 →</button></div><div class="grid">${games.map(gameCard).join('')||'<div class="empty">這個分類目前沒有符合條件的遊戲。</div>'}</div><div class="pagination"><button class="btn" id="release-prev" ${state.releasePage===0?'disabled':''}>← 上一頁</button><span class="page-indicator">第 ${state.releasePage+1} / ${pages} 頁</span><button class="btn" id="release-next" ${state.releasePage+1>=pages?'disabled':''}>下一頁 →</button></div>`;
+  pageEl().innerHTML=`${header('上市情報 / Upcoming & Announced','所有尚未正式上市的遊戲集中在這裡，並以互斥規則分類，每款遊戲只會出現在一個狀態。')}${renderReleaseFilterTabs(counts)}<div class="release-priority-note">分類優先順序 / Priority：<b>預購中</b> → <b>延期</b> → <b>搶先體驗</b> → <b>即將上市</b> → <b>已公布</b> → <b>日期待定</b></div><div class="game-filter-summary"><div><span>目前分類 / Category</span><strong>${active.icon} ${active.zh} / ${active.en}</strong></div><div><span>符合條件 / Results</span><strong>${(count||0).toLocaleString()} 款</strong></div><div><span>目前頁數 / Page</span><strong>${state.releasePage+1} / ${pages}</strong></div></div><div class="toolbar"><input class="control" id="release-search" value="${esc(state.search)}" placeholder="在「${active.zh}」中搜尋…"><button class="btn" id="release-search-btn">搜尋 / Search</button>${state.search?'<button class="btn ghost" id="release-clear-search">清除 / Clear</button>':''}<button class="btn ghost" id="open-released-games">已上市遊戲 →</button></div><div class="grid">${games.map(gameCard).join('')||'<div class="empty">這個分類目前沒有符合條件的遊戲。</div>'}</div><div class="pagination"><button class="btn" id="release-prev" ${state.releasePage===0?'disabled':''}>← 上一頁</button><span class="page-indicator">第 ${state.releasePage+1} / ${pages} 頁</span><button class="btn" id="release-next" ${state.releasePage+1>=pages?'disabled':''}>下一頁 →</button></div>`;
   bindCards();
   document.querySelectorAll('[data-release-filter]').forEach(b=>b.onclick=()=>{state.releaseFilter=b.dataset.releaseFilter;localStorage.setItem('game-intel-release-filter',state.releaseFilter);state.releasePage=0;pageCalendar();});
   document.querySelector('#release-search-btn').onclick=()=>{state.search=document.querySelector('#release-search').value.trim();state.releasePage=0;pageCalendar()};
