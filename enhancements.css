@@ -45,3 +45,17 @@
 .release-priority-note{margin:0 0 12px;border:1px solid rgba(40,215,233,.2);background:rgba(40,215,233,.045);border-radius:10px;padding:8px 10px;color:var(--muted);font-size:9px;line-height:1.55}
 .release-priority-note b{color:#dffcff;font-weight:800}
 @media(max-width:720px){.release-priority-note{font-size:8px;padding:8px}}
+
+.price-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 12px}
+.price-summary-grid>div{border:1px solid var(--line);background:rgba(11,18,29,.55);border-radius:10px;padding:9px 11px;display:grid;gap:3px}
+.price-summary-grid span{font-size:8px;color:var(--muted)}.price-summary-grid strong{font-size:14px}
+.price-card-rich{grid-template-columns:116px minmax(220px,1.45fr) 100px 120px 170px minmax(230px,1.2fr) 150px}
+.price-card-rich .price-cover{border:0;padding:0;cursor:pointer;color:#7890aa}
+.price-card-rich .price-cover img{width:100%;height:100%;display:block;object-fit:cover}
+.offer-end b{font-size:11px}.offer-end b.ok{color:var(--ok)}.offer-end b.warn{color:var(--warn)}.offer-end b.danger{color:#ff8d8d}.offer-end span{font-size:8px;color:var(--muted)}
+.price-history-compare{display:grid;gap:5px;min-width:0}.price-history-compare>small{font-size:8px;color:var(--muted)}.price-history-compare>p{margin:0;color:#b8c8d8;font-size:9px;line-height:1.35}
+.price-history-mini{display:flex;gap:6px;flex-wrap:wrap}.price-history-mini span{font-size:8px;color:var(--muted);border:1px solid rgba(143,162,186,.14);border-radius:6px;padding:3px 5px}.price-history-mini b{color:#dffcff}
+.price-card-rich .price-open{display:grid;gap:6px}.price-card-rich .price-open .btn{width:100%}
+@media(max-width:1350px){.price-card-rich{grid-template-columns:100px minmax(200px,1.4fr) 90px 110px 150px minmax(210px,1fr)}.price-card-rich .price-open{grid-column:2/-1;display:flex;justify-content:flex-start}.price-card-rich .price-open .btn{width:auto}}
+@media(max-width:950px){.price-card-rich{grid-template-columns:90px 1fr 1fr}.price-card-rich .price-game{grid-column:2/4}.price-card-rich .price-history-compare{grid-column:1/-1;border-top:1px solid var(--line);padding-top:8px}.price-card-rich .price-open{grid-column:1/-1}.offer-end{border-top:1px solid var(--line);padding-top:8px}}
+@media(max-width:720px){.price-summary-grid{grid-template-columns:1fr 1fr}.price-summary-grid>div:first-child{grid-column:1/-1}.price-card-rich{grid-template-columns:78px 1fr 1fr}.price-card-rich .price-cover{height:76px}.price-card-rich .price-game{grid-column:2/4}.price-history-mini{display:grid;grid-template-columns:1fr}.price-card-rich .price-open{display:grid;grid-template-columns:1fr 1fr}.price-card-rich .price-open .btn{width:100%}}
