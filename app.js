@@ -368,8 +368,158 @@ async function pageCalendar(){
   document.querySelector('#release-prev').onclick=()=>{state.releasePage=Math.max(0,state.releasePage-1);pageCalendar()};
   document.querySelector('#release-next').onclick=()=>{state.releasePage++;pageCalendar()};
 }
-async function pagePrices(){const {data,error}=await supabase.from('store_products').select('*,games!inner(slug,name_en,name_zh_hant)').eq('region','TW').order('discount_percent',{ascending:false}).limit(500);if(error)throw error;const ids=(data||[]).map(x=>x.id);const {data:hist}=ids.length?await supabase.from('price_history').select('product_id,price').in('product_id',ids):{data:[]};const low=new Map();for(const h of hist||[]){const k=String(h.product_id),v=Number(h.price);if(!low.has(k)||v<low.get(k))low.set(k,v)}pageEl().innerHTML=`${header('價格追蹤 / Price Tracker','Standard / Deluxe / DLC 分開比較，TW / NTD 優先。')}<div class="table-wrap"><div class="table"><div class="table-head"><span>遊戲 / 版本</span><span>平台 / 商店</span><span>原價</span><span>現價</span><span>歷史低價</span><span>連結</span></div>${(data||[]).map(x=>`<div class="table-row"><div><strong>${esc(x.games?.name_zh_hant||x.games?.name_en)}</strong><span class="sub">${esc(x.edition)}</span></div><span>${esc(x.platform)} / ${esc(x.store)}</span><span>${money(x.list_price,x.currency)}</span><b>${money(x.current_price,x.currency)} ${Number(x.discount_percent)>0?`<span class="badge ok">-${Number(x.discount_percent)}%</span>`:''}</b><span>${low.has(String(x.id))?money(low.get(String(x.id)),x.currency):'—'}</span><button class="btn" data-url="${esc(x.store_url)}">↗</button></div>`).join('')||'<div class="empty">尚無價格資料</div>'}</div></div>`;document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));}
+async function pagePrices(){
+  const {data,error}=await supabase.from('store_products')
+    .select('*,games!inner(id,slug,name_en,name_zh_hant,cover_url)')
+    .eq('region','TW')
+    .order('discount_percent',{ascending:false})
+    .order('updated_at',{ascending:false})
+    .limit(500);
+  if(error)throw error;
+  const rows=data||[];
+  const ids=rows.map(x=>x.id);
+  const {data:hist,error:histErr}=ids.length
+    ? await supabase.from('price_history')
+        .select('product_id,price,list_price,discount_percent,currency,captured_at')
+        .in('product_id',ids)
+        .order('captured_at',{ascending:true})
+    : {data:[],error:null};
+  if(histErr)throw histErr;
 
+  const historyByProduct=new Map();
+  for(const h of hist||[]){
+    const k=String(h.product_id);
+    const list=historyByProduct.get(k)||[];
+    list.push(h);
+    historyByProduct.set(k,list);
+  }
+
+  const fmtOfferEnd=(x)=>{
+    if(Number(x.discount_percent||0)<=0)return {main:'目前無優惠',sub:'No active offer',cls:''};
+    if(!x.sale_end)return {main:'期限未提供',sub:'End date unavailable',cls:'warn'};
+    const end=new Date(x.sale_end);
+    const ms=end-Date.now();
+    if(ms<=0)return {main:'優惠已結束',sub:fmtDate(x.sale_end,true),cls:'danger'};
+    const hours=Math.floor(ms/3600000);
+    const days=Math.floor(hours/24);
+    return {
+      main:days>=1?`剩 ${days} 天 ${hours%24} 小時`:`剩 ${hours} 小時`,
+      sub:`至 ${fmtDate(x.sale_end,true)}`,
+      cls:days<=1?'warn':'ok'
+    };
+  };
+
+  const compareHistory=(x)=>{
+    const all=historyByProduct.get(String(x.id))||[];
+    const currentAt=x.updated_at?new Date(x.updated_at).getTime():Date.now();
+    const previous=all.filter(h=>new Date(h.captured_at).getTime()<currentAt-1000);
+    const previousOffers=previous.filter(h=>Number(h.discount_percent||0)>0);
+    const currentPrice=x.current_price==null?null:Number(x.current_price);
+    const currentDiscount=Number(x.discount_percent||0);
+
+    if(!previous.length){
+      return {
+        low:null,
+        maxDiscount:null,
+        offerCount:0,
+        badge:'首次追蹤 / First tracked',
+        detail:'尚無先前價格可比較',
+        cls:''
+      };
+    }
+    const prices=previous.map(h=>Number(h.price)).filter(Number.isFinite);
+    const discounts=previousOffers.map(h=>Number(h.discount_percent||0)).filter(Number.isFinite);
+    const low=prices.length?Math.min(...prices):null;
+    const maxDiscount=discounts.length?Math.max(...discounts):null;
+    let badge='歷史資料 / History';
+    let detail=`已累積 ${previous.length} 筆先前價格快照`;
+    let cls='';
+
+    if(currentPrice!=null&&low!=null){
+      if(currentPrice<low){badge='🔥 新歷史低價 / New low';detail=`比先前最低價少 ${money(low-currentPrice,x.currency)}`;cls='ok';}
+      else if(currentPrice===low){badge='＝ 歷史最低價 / Matches low';detail=`等同先前最低價 ${money(low,x.currency)}`;cls='ok';}
+      else{detail=`先前最低 ${money(low,x.currency)}，目前高 ${money(currentPrice-low,x.currency)}`;}
+    }
+    if(currentDiscount>0&&maxDiscount!=null){
+      if(currentDiscount>maxDiscount){badge='🏷 最大折扣 / Best discount';detail+=` · 比先前最大折扣多 ${currentDiscount-maxDiscount} 個百分點`;cls='ok';}
+      else if(currentDiscount===maxDiscount){detail+=` · 等同先前最大折扣 -${maxDiscount}%`;}
+      else{detail+=` · 先前最大折扣 -${maxDiscount}%`;}
+    }
+    return {low,maxDiscount,offerCount:previousOffers.length,badge,detail,cls};
+  };
+
+  const platformMeta=(platform,store)=>{
+    const p=String(platform||store||'Store').toLowerCase();
+    if(p.includes('steam'))return ['ST','Steam'];
+    if(p.includes('playstation')||p.includes('ps5')||p.includes('ps4'))return ['PS','PlayStation'];
+    if(p.includes('xbox'))return ['XB','Xbox'];
+    if(p.includes('nintendo')||p.includes('switch'))return ['NS','Nintendo'];
+    if(p.includes('epic'))return ['EP','Epic'];
+    return ['◈',platform||store||'Store'];
+  };
+
+  const activeDeals=rows.filter(x=>Number(x.discount_percent||0)>0).length;
+  pageEl().innerHTML=`${header('價格追蹤 / Price Tracker','圖片、平台、優惠期限與歷史優惠比較集中顯示；TW / NTD 優先。')}
+    <div class="price-summary-grid">
+      <div><span>商品 / Products</span><strong>${rows.length.toLocaleString()}</strong></div>
+      <div><span>目前優惠 / Active deals</span><strong>${activeDeals.toLocaleString()}</strong></div>
+      <div><span>歷史快照 / History</span><strong>${(hist||[]).length.toLocaleString()}</strong></div>
+    </div>
+    <div class="price-cards">
+      ${rows.map(x=>{
+        const game=x.games||{};
+        const [icon,platformName]=platformMeta(x.platform,x.store);
+        const offer=fmtOfferEnd(x);
+        const history=compareHistory(x);
+        const cover=game.cover_url?esc(game.cover_url):'';
+        const editionZh=({'Standard':'標準版','Deluxe':'豪華版','Ultimate':'終極版','Collector':'典藏版','DLC':'下載內容','Bundle':'組合包'})[x.edition]||x.edition||'版本';
+        return `<article class="price-card price-card-rich">
+          <button class="price-cover open-game" data-slug="${esc(game.slug)}" aria-label="查看 ${esc(game.name_zh_hant||game.name_en)}">
+            ${cover?`<img src="${cover}" alt="${esc(game.name_zh_hant||game.name_en)}" loading="lazy" referrerpolicy="no-referrer">`:'GI'}
+          </button>
+          <div class="price-game">
+            <strong>${esc(game.name_zh_hant||game.name_en)}</strong>
+            <span>${esc(game.name_en||'')}</span>
+            <div class="price-labels">
+              <span class="store-badge"><i>${icon}</i>${esc(platformName)}</span>
+              <span class="store-badge">${esc(x.store||'Store')}</span>
+              <span class="store-badge">${esc(editionZh)} / ${esc(x.edition||'Edition')}</span>
+            </div>
+          </div>
+          <div class="price-value">
+            <small>原價 / List</small>
+            <span>${money(x.list_price,x.currency)}</span>
+          </div>
+          <div class="price-value current">
+            <small>現價 / Current</small>
+            <b>${money(x.current_price,x.currency)}</b>
+            ${Number(x.discount_percent)>0?`<span class="badge ok">-${Number(x.discount_percent)}%</span>`:''}
+          </div>
+          <div class="price-value offer-end">
+            <small>優惠期限 / Offer ends</small>
+            <b class="${offer.cls}">${offer.main}</b>
+            <span>${offer.sub}</span>
+          </div>
+          <div class="price-history-compare">
+            <small>與之前優惠相比 / vs Previous deals</small>
+            <span class="badge ${history.cls}">${history.badge}</span>
+            <p>${esc(history.detail)}</p>
+            <div class="price-history-mini">
+              <span>先前最低 <b>${history.low==null?'—':money(history.low,x.currency)}</b></span>
+              <span>先前最大折扣 <b>${history.maxDiscount==null?'—':`-${history.maxDiscount}%`}</b></span>
+              <span>先前優惠快照 <b>${history.offerCount}</b></span>
+            </div>
+          </div>
+          <div class="price-open">
+            <button class="btn primary open-game" data-slug="${esc(game.slug)}">遊戲情報</button>
+            ${x.store_url?`<button class="btn" data-url="${esc(x.store_url)}">前往商店 ↗</button>`:''}
+          </div>
+        </article>`;
+      }).join('')||'<div class="empty">尚無價格資料</div>'}
+    </div>`;
+  bindCards();
+  document.querySelectorAll('[data-url]').forEach(b=>b.onclick=()=>window.open(b.dataset.url,'_blank','noopener,noreferrer'));
+}
 async function pageIssues(){const {data,error}=await supabase.from('game_issues').select('*,games!inner(slug,name_en,name_zh_hant)').eq('resolved',false).order('mention_count_24h',{ascending:false}).limit(300);if(error)throw error;pageEl().innerHTML=`${header('玩家問題 / Issues','問題分類、提及量、成長率與官方確認狀態。')}<div class="panel">${(data||[]).map(x=>`<div class="issue-row" style="grid-template-columns:minmax(220px,1.3fr) 1fr 90px 90px"><div><b>${esc(x.games?.name_zh_hant||x.games?.name_en)}</b><div class="sub">${esc(x.title_zh)} / ${esc(x.title_en)}</div></div><span class="badge ${x.official_confirmed?'ok':''}">${esc(x.issue_category)}${x.official_confirmed?' · 官方確認':''}</span><span>24H ${Number(x.mention_count_24h).toLocaleString()}</span><b>${x.growth_24h!=null?`${Number(x.growth_24h)>0?'+':''}${Number(x.growth_24h)}%`:'—'}</b></div>`).join('')||'<div class="empty">目前尚未偵測到達門檻的玩家問題。</div>'}</div>`;}
 
 async function pageLive(){const {data,error}=await supabase.from('streaming_snapshots').select('*,games!inner(slug,name_en,name_zh_hant)').order('captured_at',{ascending:false}).limit(1000);if(error)throw error;const latest=new Map();for(const x of data||[]){const k=`${x.game_id}:${x.source}`;if(!latest.has(k))latest.set(k,x)}const combined=new Map();for(const x of latest.values()){const k=String(x.game_id),cur=combined.get(k)||{game:x.games,viewers:0,channels:0,sources:[]};cur.viewers+=Number(x.viewer_count);cur.channels+=Number(x.channel_count);cur.sources.push(x.source);combined.set(k,cur)}const rows=[...combined.values()].sort((a,b)=>b.viewers-a.viewers);pageEl().innerHTML=`${header('直播熱度 / Live Trends','Twitch + YouTube 分開採集，排行榜顯示合計觀看與頻道數。')}<div class="panel">${rows.map((x,i)=>`<div class="rank-row"><span class="rank">${String(i+1).padStart(2,'0')}</span><div><b>${esc(x.game?.name_zh_hant||x.game?.name_en)}</b><div class="sub">${esc(x.sources.join(' + '))}</div></div><b>${x.viewers.toLocaleString()}</b><span>${x.channels.toLocaleString()} 頻道</span></div>`).join('')||'<div class="empty">尚未取得直播快照；接通 Twitch / YouTube 同步後會自動累積。</div>'}</div>`;}
