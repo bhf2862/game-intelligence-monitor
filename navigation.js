@@ -16,7 +16,9 @@ function writeStack(stack) {
 }
 
 function fallbackFor(hash) {
-  return hash.startsWith('#game/') ? '#games' : '#dashboard';
+  if (hash.startsWith('#game/')) return '#games';
+  if (hash.startsWith('#price/')) return '#prices';
+  return '#dashboard';
 }
 
 function goBackInApp() {
