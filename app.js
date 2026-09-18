@@ -282,8 +282,12 @@ async function init(){
   }
 }
 async function checkAllowed(){
-  const {data,error}=await supabase.from('allowed_users').select('email').limit(1);
-  return !error && Array.isArray(data) && data.length>0;
+  const {data,error}=await supabase.rpc('is_allowed_user');
+  if(error){
+    console.error('[Game Intel] allowlist check failed',error);
+    return false;
+  }
+  return data===true;
 }
 
 function render(){
